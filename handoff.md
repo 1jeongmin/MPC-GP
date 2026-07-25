@@ -6,13 +6,12 @@
 
 ## 오늘 한 일 (3줄)
 
-- 2026-07-25 — **Phase 0~6 완료.** 전체 테스트 **45개 통과**. Phase 6: 증강 KF
-  비교군(ekf.py, DisturbanceStepModel, runner estimator 확장, Part1 configs).
-- KF 검증: 가관측(rank 6), 무잡음 d_hat→참외란, KF≡EKF, P·innovation 로깅.
-  **핵심 게이트 test_kf_beats_mpc_only: MPC+KF RMS e_y +5.8% (MPC-only 이김).**
-- **진단 해결**: 처음 −18%(악화) → 원인은 **부분관측(v_y 미측정)**이 d_vy 관측을
-  이중적분 뒤로 밀어 지연·과대추정. 오라클(참 외란 상수외삽)은 +7.3%로 개념 정상
-  확인 → **전상태 측정 + Q_d↑로 수정 → +5.8%**. (앞 결정 "부분관측"을 뒤집음.)
+- 2026-07-26 — **Phase 0~7 완료.** 전체 테스트 **50개 통과**. Phase 7: offline GP
+  (dataset/kernels/train_offline/casadi_export/mpc_gp, GpConfig, part1_gp).
+- **핵심 결과: MPC+GP +12% > MPC+KF +5.8% > MPC-only** (게이트 test_gp_beats_kf_beats_only).
+  게이트7(잔차0→평균0, 사후std 단조증가, np↔CasADi 일치, 표준화 재현) 통과.
+- **큰 진단**: GP 상태의존 지평결합은 mean-only에서 불안정(-45~-74%). 오라클(+13%)로
+  개념 정상 확인 → **현재 작동점 상수 주입으로 수정 → +12%** (전 M 안정). 정칙화 추가.
 
 ## Phase 5 특성화 결과 (GP 설계 입력 — 숫자를 보고 Phase 6+ 결정)
 
@@ -56,12 +55,24 @@
   limo tau≈0.010s (고유값 -119,-100, 과감쇠). limo Iz는 미식별 근사값.
 - `gamma_ss(sedan,15,0.02)=0.094675 rad/s` — 적분 대조 통과.
 
-## 다음에 먼저 할 일 — Phase 7 (offline GP)
+## 다음에 먼저 할 일 — Phase 8 (Part 1 실험 실행)
 
-Phase 7 착수 시 GP 설계를 먼저 정한다 (handoff 아래 「결정 기록」). 그 뒤
-`src/gp/`(dataset, kernels, train_offline, casadi_export), `mpc_gp.py`(GPStepModel:
-extra_param_dim>0, step=rk4+B_d@mu_GP, 이산 주입 RK4 밖), part1_gp.yaml.
-작업 전 `.claude/rules/gp-residual.md` 를 먼저 Read.
+Part 1 3-way(MPC only / +KF / +GP) 통합 실험. run_part1.py로 세 케이스를 통제변수
+동일하게 돌리고, **주 산출물 = GP 사후 std vs KF P d-블록 공간지도** + 예측구간 커버리지
++ 추종/제어/실시간 지표. Phase 8 착수 시 공정 튜닝예산(KF/GP 동일), 캘리브레이션 주지표
+결정. prompts.md에 Phase 8 프롬프트는 아직 없음(착수 시 작성).
+
+## Phase 7 산출물 메모
+
+- **결합 = 현재 작동점 상수 주입** (상태의존 지평결합 금지, mean-only 불안정).
+  GPStepModel.set_operating_point이 mu_hat=mu_GP(z_now) 1회 평가(CasADi), 지평 상수.
+  MpcBase.solve에 작동점 훅 추가(hasattr). M은 solve time 무관, 적합품질만.
+- **GP>KF 재정립**: 지평예측 아님. 상태→외란 직접학습이라 즉시 정확(KF는 필터지연).
+- 정칙화 sigma_n_floor=1e-2 필수 (없으면 보간 과적합→궤적밖 진동).
+- 입력 3D[vy,gamma,delta], 채널2 독립, ARD RBF, Type-II ML(log-det). 직접 numpy GP.
+- 분산은 제어 아님, post-hoc 로깅(mean-only). 사후 std 단조증가 확인됨(UQ 논증).
+- **주의(Phase 8/분포이동)**: GP는 MPC-only 궤적으로 학습. 상수결합이라 강건하지만,
+  더 공격적 시나리오(a_y=6/dlc)에선 외삽 영역↑ → 사후분산↑(UQ 시연 포인트).
 
 ## Phase 6 산출물 메모
 

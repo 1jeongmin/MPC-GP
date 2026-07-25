@@ -498,13 +498,13 @@ mu(z) = k(z_std, Z) @ alpha (표준화 공간 계산 후 역표준화해 r 반�
 Z/alpha/하이퍼파라미터/표준화통계를 CasADi 파라미터로 주입.
 **numpy GP 예측과 CasADi 예측이 일치하는지 대조 (필수).**
 
-## src/control/mpc_gp.py
-GPStepModel: extra_param_dim = 평탄화된 [Z, alpha, lengthscale, sigma_f, 표준화통계].
-  step_sym = rk4_step(f_nom) + B_d @ mu_GP(z_k), z_k=[x[0],x[1],u]. **RK4 밖**.
+## src/control/mpc_gp.py  (⚠ Phase 7 진단으로 결합 형태 정정 — 아래 「정정」 참조)
+GPStepModel: 현재 작동점 상수 결합. extra_param_dim=2 (mu_hat).
+  set_operating_point(x0,u_prev): mu_hat = mu_GP([x0[0],x0[1],u_prev]) 를 CasADi 표현으로
+    1회 평가·저장 (MpcBase.solve 훅이 호출).
+  step_sym = rk4_step(f_nom) + B_d @ mu_hat (지평 상수). **RK4 밖**.
   (KF 의 연속 외란(RK4 안)과 대비 — GP 잔차는 이산 상태차이 단위.)
-  mu_GP 는 각 지평 스텝의 **예측 상태** z_k 에서 평가된다 -> GP 는 외란을 지평에서
-  d(x) 로 예측한다. 이것이 KF 의 상수 d_hat(오라클 상한 +7.3%)을 넘는 근거다.
-  extra_param_values() = 학습된 값 (offline 이므로 고정). MpcBase/mpc_nominal 무수정.
+  extra_param_values() = mu_hat. MpcBase/mpc_nominal 무수정(작동점 훅만 추가).
 
 ## 사후분산 (제어에 넣지 않되 반드시 저장)
 mean-only 제어. 분산을 제약·비용에 전파하지 마라. 그러나 매 스텝
@@ -526,6 +526,16 @@ part1_gp 는 part1_mpc_only/part1_kf 와 통제변수(경로·IC·seed·N·가�
 
 **게이트**: testing.md 게이트 7 전부 + 사후 std 단조 증가 + numpy↔CasADi 일치 +
 **MPC+GP < MPC+KF < MPC-only** (추종오차).
+
+### Phase 7 진단 정정 (2026-07-26) — 결합은 상태의존이 아니라 지평 상수
+
+프롬프트 초안은 mu_GP(z_k)를 각 지평 예측상태에서 평가(상태의존 결합)했으나, 그러면
+mean-only MPC 가 GP 부정확 영역을 최적화에서 악용해 **불안정**해진다(격자 완벽적합에도
+-74%). 판별: 이산 오라클(참 1스텝잔차 상수) +13%, 상수-GP +12%, 상태의존-GP -45~-74%.
+→ **GP 평균을 현재 작동점에서 1회 평가해 지평 상수로 주입**한다. 결과: 전 M 에서
+안정적으로 MPC+GP +12% > MPC+KF +5.8% > MPC-only. GP 가 KF 를 이기는 이유도 재정립:
+지평예측이 아니라 상태->외란 직접학습이라 현재상태에서 즉시 정확(KF는 필터 지연).
+정칙화(sigma_n_floor)로 보간 과적합도 막는다. 룰 반영: gp-residual.md, mpc-solver.md.
 
 ---
 

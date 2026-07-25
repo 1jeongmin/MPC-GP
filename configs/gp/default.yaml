@@ -1,0 +1,12 @@
+# offline GP 기본 설정 (.claude/rules/gp-residual.md).
+# 입력 z=[v_y,gamma,delta] (3D, v_x 제외), 채널 v_y·gamma 독립 2개, ARD RBF, Type-II ML.
+# 하이퍼파라미터 초기값은 표준화 공간 기준 (입력·타깃 모두 z-score 표준화).
+
+M: 100                   # 딕셔너리 크기 (고정). 학습 궤적에서 균일 subsample.
+                         # 상수-GP 결합이라 mu 는 solve당 1회 평가(작동점) -> M 은
+                         # solve time 에 무관, 적합 품질만 결정. Phase 9 sparse.
+init_lengthscale: 1.0    # 표준화 입력 기준 초기 lengthscale
+init_sigma_f: 1.0        # 표준화 타깃 기준 초기 신호 표준편차
+init_sigma_n: 0.1        # 표준화 타깃 기준 초기 잡음 표준편차
+sigma_n_floor: 1.0e-2    # 잡음 하한 (정칙화 — sigma_n->0 보간 과적합 방지, Phase 7 진단)
+jitter: 1.0e-8           # K 대각 안정화

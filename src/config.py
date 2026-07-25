@@ -315,6 +315,40 @@ class EkfConfig:
         )
 
 
+@dataclass(frozen=True)
+class GpConfig:
+    """offline GP 설정 (.claude/rules/gp-residual.md).
+
+    입력 z=[v_y,gamma,delta] (3D), 채널 v_y·gamma 독립 2개, ARD RBF, Type-II ML.
+    M: 딕셔너리 크기(고정). 초기 하이퍼파라미터는 표준화 공간 기준.
+    """
+    M: int
+    init_lengthscale: float = 1.0
+    init_sigma_f: float = 1.0
+    init_sigma_n: float = 0.1
+    sigma_n_floor: float = 1.0e-2   # 표준화 단위 잡음 하한 (정칙화 — 보간 과적합 방지)
+    jitter: float = 1.0e-8
+
+    def __post_init__(self) -> None:
+        if not (isinstance(self.M, int) and self.M > 0):
+            raise ValueError(f"M 은 양의 정수여야 한다 (got {self.M!r}).")
+        for name in ("init_lengthscale", "init_sigma_f", "init_sigma_n",
+                     "sigma_n_floor", "jitter"):
+            if not (getattr(self, name) > 0.0):
+                raise ValueError(f"GpConfig.{name} 는 양수여야 한다.")
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "GpConfig":
+        return cls(
+            M=int(d["M"]),
+            init_lengthscale=float(d.get("init_lengthscale", 1.0)),
+            init_sigma_f=float(d.get("init_sigma_f", 1.0)),
+            init_sigma_n=float(d.get("init_sigma_n", 0.1)),
+            sigma_n_floor=float(d.get("sigma_n_floor", 1.0e-2)),
+            jitter=float(d.get("jitter", 1.0e-8)),
+        )
+
+
 def _dataclass_to_plain(obj: Any) -> dict[str, Any]:
     """dataclass -> 순수 dict (tuple 등을 YAML/JSON 친화 형태로)."""
     d = asdict(obj)
@@ -333,6 +367,7 @@ class ExperimentConfig:
     path: "PathConfig | None" = None
     mpc: "MpcConfig | None" = None
     ekf: "EkfConfig | None" = None
+    gp: "GpConfig | None" = None
     # 조합 파일이 참조한 그룹 이름 -> config 이름 (재현성 스냅샷에 남긴다).
     raw_refs: dict[str, str] = field(default_factory=dict)
 
@@ -351,6 +386,8 @@ class ExperimentConfig:
             snap["mpc"] = _dataclass_to_plain(self.mpc)
         if self.ekf is not None:
             snap["ekf"] = _dataclass_to_plain(self.ekf)
+        if self.gp is not None:
+            snap["gp"] = _dataclass_to_plain(self.gp)
         return snap
 
 
@@ -362,6 +399,7 @@ _GROUP_LOADERS = {
     "path": PathConfig.from_dict,
     "mpc": MpcConfig.from_dict,
     "ekf": EkfConfig.from_dict,
+    "gp": GpConfig.from_dict,
 }
 
 
@@ -403,5 +441,6 @@ def load_experiment(name: str, configs_dir: Path = CONFIGS_DIR) -> ExperimentCon
         path=load_group("path", refs["path"], configs_dir) if "path" in refs else None,
         mpc=load_group("mpc", refs["mpc"], configs_dir) if "mpc" in refs else None,
         ekf=load_group("ekf", refs["ekf"], configs_dir) if "ekf" in refs else None,
+        gp=load_group("gp", refs["gp"], configs_dir) if "gp" in refs else None,
         raw_refs=refs,
     )

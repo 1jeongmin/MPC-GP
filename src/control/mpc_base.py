@@ -183,6 +183,12 @@ class MpcBase:
             raise ValueError(f"preview 길이 {len(preview)} != N {self.N}")
         x0 = np.asarray(x0, float).reshape(4)
 
+        # 작동점 의존 모델(예: GP 보정) 훅: 현재 상태에서 보정을 갱신한다.
+        # GP 는 모델 보정자이므로 현재 작동점에서 mu 를 평가해 지평 상수로 쓴다
+        # (상태의존 지평 결합은 mean-only MPC 를 불안정하게 만든다 — Phase 7 진단).
+        if hasattr(self.model, "set_operating_point"):
+            self.model.set_operating_point(x0, float(u_prev))
+
         self.opti.set_value(self._p_x0, x0)
         self.opti.set_value(self._p_vx, preview.vx)
         self.opti.set_value(self._p_kappa, preview.kappa)

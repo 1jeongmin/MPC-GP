@@ -112,15 +112,19 @@ RMS(r_ey)   ≈ 0.5 * dt_ctrl * RMS(r_vy)
 ## CasADi 결합
 
 ```
-mu(z) = k(z, Z) @ alpha          # alpha = 사전계산된 가중치 벡터
+mu(z) = k(z, Z) @ alpha          # alpha = 사전계산된 가중치 벡터 (표준화 공간)
 ```
 
-- `Z`(inducing/dictionary 입력), `alpha`, 하이퍼파라미터는 CasADi **파라미터**로 주입한다.
-- **`M`(dictionary 크기)은 고정하고 내용만 갱신한다.** 그래야 온라인 갱신에도
-  NLP 구조를 재생성하지 않는다. (제안 — `mpc-solver.md`와 짝을 이루는 결정)
-- GPyTorch 등으로 학습한 결과는 `casadi_export.py`를 거쳐 순수 CasADi 표현으로
-  변환한다. 제어 루프 안에서 PyTorch를 호출하지 마라.
-- 변환 후 **GPyTorch 예측값과 CasADi 예측값이 일치하는지 대조 테스트**를 반드시 둔다.
+- **결합은 현재 작동점 상수 주입이다 (Phase 7 진단 확정).** `mu_hat = mu(z_now)` 를
+  solve당 1회 평가해 지평 상수로 이산 주입한다. 상태의존 지평 결합(mu(z_k))은 mean-only
+  MPC 를 불안정하게 만드므로 금지 (상세 `mpc-solver.md` 「GP 결합 시」).
+- 따라서 `M` 은 solve time 에 무관하고 적합 품질만 결정한다. mu_hat 은 CasADi
+  파라미터(2)로 주입한다. `Z`/`alpha`/하이퍼파라미터는 `mu` 함수 평가용 파라미터다.
+- **프레임워크 = 직접 numpy/scipy exact GP (torch 미사용).** 학습은 오프라인, 추론은
+  `casadi_export.py` 의 CasADi 표현으로 한다. 제어 루프에서 torch 를 호출하지 마라.
+- 변환 후 **numpy GP 예측과 CasADi 예측이 일치하는지 대조 테스트**를 반드시 둔다.
+- **정칙화**: `sigma_n` 에 하한(`sigma_n_floor`)을 둔다. 없으면 `sigma_n->0` 으로 보간
+  과적합이 일어나 학습 궤적 밖(배포 분포)에서 진동한다 (Phase 7 진단으로 확인).
 
 ## Part 2의 4개 변형은 인터페이스를 통일한다
 
