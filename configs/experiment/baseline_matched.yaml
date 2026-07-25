@@ -1,0 +1,10 @@
+# 조합 파일 — 값을 직접 적지 말고 그룹을 참조해 조립한다
+# (.claude/rules/sim-experiment.md "케이스 정의는 config로만").
+# 각 키는 configs/<group>/<name>.yaml 을 가리킨다.
+#
+# 모델 완전일치 베이스라인: 플랜트도 선형이라 잔차가 noise floor 수준이어야 한다.
+# Phase 4에서 검증에 쓴다. mpc 그룹은 Phase 3에서 추가된다.
+vehicle: sedan
+sim: default
+# path: single_curve   # Phase 2 이후 활성화
+# mpc: default         # Phase 3 이후 활성화
