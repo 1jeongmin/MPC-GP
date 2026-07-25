@@ -72,6 +72,22 @@ class SolveInfo:
     U: np.ndarray              # (1, N) 예측 입력 시퀀스
 
 
+def build_step_function(model: StepModel) -> ca.Function:
+    """StepModel 의 심볼릭 step_sym 을 수치 CasADi Function 으로 감싼다.
+
+    extra_param_dim == 0 인 모델(명목) 전용. 잔차 계산에서 MPC 예측과 **동일한**
+    이산 전이를 재사용하기 위한 것이다 (복사 금지). 반환 F(x[4],u,vx,kappa) -> x_next[4].
+    """
+    if model.extra_param_dim != 0:
+        raise ValueError("build_step_function 은 extra_param_dim==0 모델 전용이다.")
+    x = ca.SX.sym("x", 4)
+    u = ca.SX.sym("u")
+    vx = ca.SX.sym("vx")
+    kappa = ca.SX.sym("kappa")
+    x_next = model.step_sym(x, u, vx, kappa, None)
+    return ca.Function("F_step", [x, u, vx, kappa], [x_next])
+
+
 def _shift(arr: np.ndarray) -> np.ndarray:
     """warm start / fallback 용 한 스텝 shift (마지막 열 반복)."""
     return np.concatenate([arr[:, 1:], arr[:, -1:]], axis=1)

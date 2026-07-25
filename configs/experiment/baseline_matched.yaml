@@ -6,5 +6,7 @@
 # Phase 4에서 검증에 쓴다. mpc 그룹은 Phase 3에서 추가된다.
 vehicle: sedan
 sim: default
-# path: single_curve   # Phase 2 이후 활성화
-# mpc: default         # Phase 3 이후 활성화
+path: single_curve
+mpc: default
+# 플랜트 모델은 experiment 키가 아니라 스크립트에서 주입한다(선형=명목과 동일).
+# Phase 5 에서 비선형 플랜트를 별도 mismatch_*.yaml 로 구분한다.

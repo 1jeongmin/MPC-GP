@@ -6,11 +6,12 @@
 
 ## 오늘 한 일 (3줄)
 
-- 2026-07-25 — **Phase 0·1·2·3 완료.** 전체 테스트 **26개 통과** (게이트 1·2·2b·3·5·6·8).
-- Phase 3: 명목 MPC. `MpcConfig`, `Preview`+`StepModel`+`MpcBase`(multiple shooting
-  +IPOPT, warm start, 수렴실패 fallback), `NominalStepModel`. 게이트 6 통과.
-- 설계 확정: preview=Preview 데이터클래스, 동역학=StepModel 주입(이산 전이,
-  GP 파라미터는 P 확장블록). dt_ctrl은 MpcConfig 아님 — SimConfig가 단일 소스.
+- 2026-07-25 — **Phase 0~4 완료.** 전체 테스트 **30개 통과** (게이트 1·2·2b·3·5·6·8
+  + Phase 4 완전일치 잔차).
+- Phase 4: 다중레이트 폐루프(`runner`, 플랜트 주입), `logger`, `metrics`, `plots`,
+  `run_sim.py`. 모델완전일치 잔차 = noise floor 자릿수 검증 통과.
+- sedan matched: 잔차 2.6~9.2× floor(1e-8~1e-10), 추종 RMS e_y=7.8mm,
+  solve mean 9.2ms(<20ms), dt초과 0%, 수렴실패 0%.
 
 ## 측정값 (기준선 — 이후 잔차 해석에 사용)
 
@@ -30,22 +31,28 @@
 
 ## 다음에 먼저 할 일
 
-1. `prompts.md`의 **Phase 4 프롬프트** 입력 (다중레이트 폐루프 + 잔차 로깅).
-   작업 전 `.claude/rules/sim-experiment.md`, `gp-residual.md` 를 먼저 Read.
-2. `src/sim/runner.py`(플랜트 주입 가능, 100/50Hz), `logger.py`, `eval/metrics.py`,
-   `viz/plots.py`, `scripts/run_sim.py`, `configs/experiment/baseline_matched.yaml`
-   (path/mpc 참조 활성화).
-3. **검증 핵심**: 모델완전일치(플랜트도 선형) 잔차가 Phase 1 noise floor와 같은
-   자릿수여야 한다. 채널별 배율로 비교(직접 비교 금지). e_psi/e_y ≤ 10×floor.
-4. 잔차는 MPC 예측과 **같은 함수**로 계산 (복사 금지), dt_ctrl 경계에서만.
+1. `prompts.md`의 **Phase 5 프롬프트** 입력 (비선형 플랜트 + 잔차 특성화).
+   **여기서 처음으로 실제 모델 불일치를 만든다. GP 설계의 입력이 되는 산출물.**
+   작업 전 `.claude/rules/vehicle-model.md`, `gp-residual.md` 를 먼저 Read.
+2. `src/models/tire.py`(Fiala, 출처 확인·명시), `tests/test_tire.py`(alpha→0
+   극한 dFy/dalpha→C_alpha 가 최우선 게이트), `src/models/nonlinear_bicycle.py`
+   (**타이어만 교체, 오차기구학 절대 불변**), `configs/experiment/mismatch_*.yaml`.
+3. **진짜 산출물**: 채널별 잔차 SNR(=잔차/noise floor 배율), a_y_max 스윕별 SNR
+   곡선, (v_y,gamma,delta) 산점도 커버리지. → GP 입력·M·수집 시나리오 결정 근거.
+4. runner 는 이미 plant_rhs 주입식 → 비선형 플랜트를 넣어도 runner 수정 없음.
 
-## Phase 3 산출물 메모
+## Phase 4 산출물 메모
 
-- **solve time 평균 ~23ms > dt_ctrl 20ms** (cold Python/IPOPT, warm후 iters 11~15).
-  실시간성은 Part 2 과제 — Phase 3 게이트(정합성)와 무관. 측정값으로만 보고.
+- **solve time 정정**: 폐루프 warm start 로 mean 9.2ms (<20ms), dt초과 0%.
+  Phase 3의 23ms 우려는 cold+짧은런 편향이었음. 명목 MPC는 실시간 가능.
+- 잔차 계산 = `build_step_function(NominalStepModel)` → MPC 예측과 동일 이산 전이
+  재사용(복사 아님). 잔차는 항상 **명목** 대비 (GP 케이스도 동일).
+- **limo 주의**: single_curve 속도프로파일(a_y=4.0→vx 14)이 sedan용. limo는
+  vx≤1.0 clip 크롤(25s에 25m). 절대잔차는 noise-floor 수준이나 sedan floor 대비
+  배율(gamma 548×)은 limo의 다른 동역학 스케일 탓, 버그 아님. limo 전용 경로는
+  파라미터 식별 후로 미룸.
 - StepModel 주입 완료 → Phase 7 GP는 MpcBase/mpc_nominal 수정 없이 붙는다.
   GP StepModel: extra_param_dim>0, step_sym=rk4+B_d@mu_GP, P 확장블록에 Z/alpha.
-- warm start = 이전 해 shift. 수렴실패 fallback = 이전 해 shift(converged=False 기록).
 
 ## Phase 2 산출물 메모
 

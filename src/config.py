@@ -271,18 +271,25 @@ class ExperimentConfig:
     name: str
     vehicle: VehicleConfig
     sim: SimConfig
+    path: "PathConfig | None" = None
+    mpc: "MpcConfig | None" = None
     # 조합 파일이 참조한 그룹 이름 -> config 이름 (재현성 스냅샷에 남긴다).
     raw_refs: dict[str, str] = field(default_factory=dict)
 
     def to_snapshot(self) -> dict[str, Any]:
         """재현성 스냅샷용 dict 덤프. 참조가 아니라 조립된 값 전체를 담는다
         (.claude/rules/sim-experiment.md "재현성")."""
-        return {
+        snap = {
             "name": self.name,
             "refs": dict(self.raw_refs),
             "vehicle": _dataclass_to_plain(self.vehicle),
             "sim": _dataclass_to_plain(self.sim),
         }
+        if self.path is not None:
+            snap["path"] = _dataclass_to_plain(self.path)
+        if self.mpc is not None:
+            snap["mpc"] = _dataclass_to_plain(self.mpc)
+        return snap
 
 
 # 그룹 이름 -> 해당 dataclass 로더 매핑.
@@ -330,5 +337,7 @@ def load_experiment(name: str, configs_dir: Path = CONFIGS_DIR) -> ExperimentCon
         name=name,
         vehicle=load_group("vehicle", refs["vehicle"], configs_dir),
         sim=load_group("sim", refs["sim"], configs_dir),
+        path=load_group("path", refs["path"], configs_dir) if "path" in refs else None,
+        mpc=load_group("mpc", refs["mpc"], configs_dir) if "mpc" in refs else None,
         raw_refs=refs,
     )
