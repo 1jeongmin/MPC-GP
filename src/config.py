@@ -193,6 +193,69 @@ class PathConfig:
         )
 
 
+@dataclass(frozen=True)
+class MpcConfig:
+    """명목 MPC 정식화·솔버 설정 (.claude/rules/mpc-solver.md).
+
+    가중치 이름은 KF 잡음 공분산(Q_kf, R_kf)과 절대 겹치지 않게 짓는다.
+    상태 가중치는 W_ 접두사, 입력은 R_ 접두사(값 자체는 명시적 이름).
+    단위: 지평 N [스텝], dt_ctrl [s], 가중치 [무차원 상대], IPOPT 옵션.
+
+    비용:
+      sum_k [ W_ey*e_y^2 + W_epsi*e_psi^2 + W_vy*v_y^2 + W_gamma*gamma^2
+              + R_delta*delta^2 + R_ddelta*(delta_k - delta_{k-1})^2 ]
+      + Wf_ey*e_y_N^2 + Wf_epsi*e_psi_N^2   (종단항)
+
+    dt_ctrl 은 여기 두지 않는다 — 타이밍은 SimConfig 가 단일 소스이며,
+    컨트롤러 생성 시 주입한다 (두 곳에 두면 어긋난다).
+    """
+    N: int
+    # 스테이지 상태 가중치
+    W_ey: float
+    W_epsi: float
+    W_vy: float
+    W_gamma: float
+    # 입력 가중치
+    R_delta: float
+    R_ddelta: float
+    # 종단 가중치
+    Wf_ey: float
+    Wf_epsi: float
+    # IPOPT 옵션 (케이스 간 동일하게 유지 — 다르면 solve time 비교 무의미)
+    ipopt_max_iter: int
+    ipopt_tol: float
+    ipopt_print_level: int
+
+    def __post_init__(self) -> None:
+        if not (isinstance(self.N, int) and self.N > 0):
+            raise ValueError(f"N 은 양의 정수여야 한다 (got {self.N!r}).")
+        for name in ("W_ey", "W_epsi", "W_vy", "W_gamma", "R_delta", "R_ddelta",
+                     "Wf_ey", "Wf_epsi"):
+            val = getattr(self, name)
+            if not (val >= 0.0):
+                raise ValueError(f"MpcConfig.{name} 는 음수가 아니어야 한다 (got {val}).")
+        if not (self.ipopt_max_iter > 0):
+            raise ValueError(f"ipopt_max_iter 는 양수여야 한다 (got {self.ipopt_max_iter}).")
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "MpcConfig":
+        ip = d.get("ipopt", {})
+        return cls(
+            N=int(d["N"]),
+            W_ey=float(d["W_ey"]),
+            W_epsi=float(d["W_epsi"]),
+            W_vy=float(d["W_vy"]),
+            W_gamma=float(d["W_gamma"]),
+            R_delta=float(d["R_delta"]),
+            R_ddelta=float(d["R_ddelta"]),
+            Wf_ey=float(d["Wf_ey"]),
+            Wf_epsi=float(d["Wf_epsi"]),
+            ipopt_max_iter=int(ip.get("max_iter", 200)),
+            ipopt_tol=float(ip.get("tol", 1e-8)),
+            ipopt_print_level=int(ip.get("print_level", 0)),
+        )
+
+
 def _dataclass_to_plain(obj: Any) -> dict[str, Any]:
     """dataclass -> 순수 dict (tuple 등을 YAML/JSON 친화 형태로)."""
     d = asdict(obj)
@@ -228,6 +291,7 @@ _GROUP_LOADERS = {
     "vehicle": VehicleConfig.from_dict,
     "sim": SimConfig.from_dict,
     "path": PathConfig.from_dict,
+    "mpc": MpcConfig.from_dict,
 }
 
 

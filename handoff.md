@@ -6,11 +6,11 @@
 
 ## 오늘 한 일 (3줄)
 
-- 2026-07-25 — **Phase 0·1·2 완료.** config+모델(0), 적분기+개루프검증(1),
-  참조경로 kappa(s) 프로파일(2) 구현. 전체 테스트 **21개 통과**.
-- Phase 2: `PathConfig`(config.py) + `Reference`(reference.py: kappa_of_s,
-  vx_max_of_s, get_preview, reconstruct_xy). single_curve(R=50,a_y=4.0 확정) + dlc.
-- 게이트 1·2·2b·3·5·8 통과. casadi/scipy/pytest/pyyaml/matplotlib 설치됨.
+- 2026-07-25 — **Phase 0·1·2·3 완료.** 전체 테스트 **26개 통과** (게이트 1·2·2b·3·5·6·8).
+- Phase 3: 명목 MPC. `MpcConfig`, `Preview`+`StepModel`+`MpcBase`(multiple shooting
+  +IPOPT, warm start, 수렴실패 fallback), `NominalStepModel`. 게이트 6 통과.
+- 설계 확정: preview=Preview 데이터클래스, 동역학=StepModel 주입(이산 전이,
+  GP 파라미터는 P 확장블록). dt_ctrl은 MpcConfig 아님 — SimConfig가 단일 소스.
 
 ## 측정값 (기준선 — 이후 잔차 해석에 사용)
 
@@ -30,19 +30,26 @@
 
 ## 다음에 먼저 할 일
 
-1. `prompts.md`의 **Phase 3 프롬프트** 입력 (명목 MPC: CasADi multiple shooting + IPOPT).
-   작업 전 `.claude/rules/mpc-solver.md` 를 먼저 Read.
-2. `configs/mpc/default.yaml`(가중치 이름은 KF와 구분 — W_x/W_u/W_du 계열),
-   `src/control/mpc_base.py`(추상 인터페이스, **이산 전이함수 F 주입**),
-   `src/control/mpc_nominal.py`, `tests/test_mpc.py` 게이트 6.
-3. **핵심 설계**: MPC는 연속 우변 f 가 아니라 이산 전이 F(x,u,p)=rk4(f_nom)+B_d@mu_GP 를
-   주입받는다. GP 케이스에서 코드 수정 없이 붙도록. if 분기 금지.
-4. preview 자료구조(get_preview 반환)를 MPC 파라미터로 어떻게 넘길지 먼저 합의.
+1. `prompts.md`의 **Phase 4 프롬프트** 입력 (다중레이트 폐루프 + 잔차 로깅).
+   작업 전 `.claude/rules/sim-experiment.md`, `gp-residual.md` 를 먼저 Read.
+2. `src/sim/runner.py`(플랜트 주입 가능, 100/50Hz), `logger.py`, `eval/metrics.py`,
+   `viz/plots.py`, `scripts/run_sim.py`, `configs/experiment/baseline_matched.yaml`
+   (path/mpc 참조 활성화).
+3. **검증 핵심**: 모델완전일치(플랜트도 선형) 잔차가 Phase 1 noise floor와 같은
+   자릿수여야 한다. 채널별 배율로 비교(직접 비교 금지). e_psi/e_y ≤ 10×floor.
+4. 잔차는 MPC 예측과 **같은 함수**로 계산 (복사 금지), dt_ctrl 경계에서만.
+
+## Phase 3 산출물 메모
+
+- **solve time 평균 ~23ms > dt_ctrl 20ms** (cold Python/IPOPT, warm후 iters 11~15).
+  실시간성은 Part 2 과제 — Phase 3 게이트(정합성)와 무관. 측정값으로만 보고.
+- StepModel 주입 완료 → Phase 7 GP는 MpcBase/mpc_nominal 수정 없이 붙는다.
+  GP StepModel: extra_param_dim>0, step_sym=rk4+B_d@mu_GP, P 확장블록에 Z/alpha.
+- warm start = 이전 해 shift. 수렴실패 fallback = 이전 해 shift(converged=False 기록).
 
 ## Phase 2 산출물 메모
 
 - 세그먼트 스키마 = {length, kappa_end}. 시작곡률=이전끝(0에서 출발) → C0 연속 자동.
-  kappa(s)는 np.interp 한 줄. single_curve 140m, dlc 126m.
 - dlc 최대 횡변위 8.5m (실차선보다 큼) — Phase 5에서 잔차 SNR 보고 재조정 예정.
 - `Reference(path_cfg, vx_range)` — vx_range는 차량 config에서 주입 (경로 속성 아님).
 

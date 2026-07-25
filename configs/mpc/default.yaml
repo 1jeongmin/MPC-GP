@@ -1,0 +1,30 @@
+# 명목 MPC 기본 설정 (.claude/rules/mpc-solver.md).
+#
+# 가중치 이름은 KF 잡음 공분산(Q_kf, R_kf)과 절대 겹치지 않게 짓는다.
+# practice1 의 R, R_d 이름은 쓰지 않는다.
+# dt_ctrl 은 여기 두지 않는다 — SimConfig 가 단일 소스, 컨트롤러 생성 시 주입.
+#
+# 아래 가중치는 제안 기본값이다 (TODO: 폐루프 추종성능을 보고 튜닝).
+# 튜닝 예산은 GP/EKF 와 같은 형식으로 기록한다 (ekf-baseline.md 공정성).
+
+N: 30                 # 예측 지평 [스텝]. dt_ctrl=0.02 -> 0.6 s. vx~14 에서 약 8.4 m 프리뷰.
+
+# 스테이지 상태 가중치 (추종오차 우선, 동적상태는 작은 정규화)
+W_ey: 10.0            # 횡방향오차 e_y [1/m^2]
+W_epsi: 5.0           # 헤딩오차 e_psi [1/rad^2]
+W_vy: 0.1            # 횡속도 v_y 정규화
+W_gamma: 0.1         # 요레이트 gamma 정규화
+
+# 입력 가중치
+R_delta: 1.0         # 조향각 크기
+R_ddelta: 10.0       # 조향각 변화율 (평활화)
+
+# 종단 가중치 (추종오차만)
+Wf_ey: 20.0
+Wf_epsi: 10.0
+
+# IPOPT 옵션 — 케이스 간 동일하게 유지 (다르면 solve time 비교 무의미)
+ipopt:
+  max_iter: 200
+  tol: 1.0e-8
+  print_level: 0
