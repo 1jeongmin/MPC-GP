@@ -1,0 +1,29 @@
+# Double lane change 경로 — 두 번째 경로 (Phase 5 이후 잔차를 크게 만드는 용도).
+# 지금은 정의만 한다. 검증은 single_curve 로 수행한다.
+#
+# 부드러운 좌-우-복귀 곡률: 부호가 교대하는 클로소이드로 차선변경을 만든다.
+# +kappa -> 0 -> -kappa -> 0 -> +kappa -> 0. 계단형 금지.
+# 값은 제안값이며 Phase 5 진입 시 잔차 SNR을 보고 재조정할 수 있다.
+#
+# 세그먼트 스키마는 single_curve.yaml 과 동일: {length, kappa_end}, 시작=이전 끝.
+
+a_y_max: 4.0             # m/s^2
+kappa_eps: 1.0e-4        # 1/m
+kappa_max: 0.03          # 1/m,  참고용 (최대 곡률, R ~= 33 m)
+
+# 이중차선변경: 각 차선변경은 곡률 +k -> 0 -> -k -> 0 (S자, 헤딩 복귀 + 횡변위).
+# 첫 변경(좌측 이동)과 둘째 변경(우측 복귀)을 부호 반대로 이어 붙여
+# 최종 헤딩·횡변위가 모두 원위치로 돌아온다. 순 헤딩 변화 = 0.
+segments:
+  - {label: straight_in, length: 15.0, kappa_end: 0.0}
+  # 차선변경 1 (좌측으로 이동)
+  - {label: lc1_a, length: 12.0, kappa_end: 0.03}    # 0 -> +k
+  - {label: lc1_b, length: 12.0, kappa_end: 0.0}     # +k -> 0
+  - {label: lc1_c, length: 12.0, kappa_end: -0.03}   # 0 -> -k
+  - {label: lc1_d, length: 12.0, kappa_end: 0.0}     # -k -> 0  (헤딩 복귀)
+  # 차선변경 2 (우측으로 복귀, 부호 반대)
+  - {label: lc2_a, length: 12.0, kappa_end: -0.03}   # 0 -> -k
+  - {label: lc2_b, length: 12.0, kappa_end: 0.0}     # -k -> 0
+  - {label: lc2_c, length: 12.0, kappa_end: 0.03}    # 0 -> +k
+  - {label: lc2_d, length: 12.0, kappa_end: 0.0}     # +k -> 0  (헤딩 복귀)
+  - {label: straight_out, length: 15.0, kappa_end: 0.0}

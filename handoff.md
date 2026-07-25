@@ -6,11 +6,11 @@
 
 ## 오늘 한 일 (3줄)
 
-- 2026-07-25 — **Phase 0 + Phase 1 완료.** config 체계 + 선형 자전거 모델(Phase 0),
-  적분기(`integrators.py`: RK4 + DOP853 plant_step) + 개루프 검증(Phase 1) 구현.
-- 게이트 **1(정상상태 요레이트 1% 이내), 2(언더/오버/뉴트럴), 2b, 3, 5 전부 통과.**
-  전체 테스트 13개 pass. `run_openloop.py`로 sedan/limo 스텝 응답 + 재현성 메타 생성.
-- casadi/scipy/pytest/pyyaml/matplotlib 설치됨.
+- 2026-07-25 — **Phase 0·1·2 완료.** config+모델(0), 적분기+개루프검증(1),
+  참조경로 kappa(s) 프로파일(2) 구현. 전체 테스트 **21개 통과**.
+- Phase 2: `PathConfig`(config.py) + `Reference`(reference.py: kappa_of_s,
+  vx_max_of_s, get_preview, reconstruct_xy). single_curve(R=50,a_y=4.0 확정) + dlc.
+- 게이트 1·2·2b·3·5·8 통과. casadi/scipy/pytest/pyyaml/matplotlib 설치됨.
 
 ## 측정값 (기준선 — 이후 잔차 해석에 사용)
 
@@ -30,12 +30,21 @@
 
 ## 다음에 먼저 할 일
 
-1. `prompts.md`의 **Phase 2 프롬프트** 입력 (참조 경로 = 곡률 프로파일 kappa(s)).
-   작업 전 `.claude/rules/sim-experiment.md` "경로 표현" 절을 먼저 Read.
-2. `configs/path/{single_curve,dlc}.yaml`, `src/path/reference.py`,
-   `tests/test_reference.py` 게이트 8.
-3. `single_curve.yaml` 기본값(구간 길이·곡률반경·a_y_max·kappa_eps)은
-   **제안 후 사용자 확인**받고 확정 (프롬프트에 명시됨).
+1. `prompts.md`의 **Phase 3 프롬프트** 입력 (명목 MPC: CasADi multiple shooting + IPOPT).
+   작업 전 `.claude/rules/mpc-solver.md` 를 먼저 Read.
+2. `configs/mpc/default.yaml`(가중치 이름은 KF와 구분 — W_x/W_u/W_du 계열),
+   `src/control/mpc_base.py`(추상 인터페이스, **이산 전이함수 F 주입**),
+   `src/control/mpc_nominal.py`, `tests/test_mpc.py` 게이트 6.
+3. **핵심 설계**: MPC는 연속 우변 f 가 아니라 이산 전이 F(x,u,p)=rk4(f_nom)+B_d@mu_GP 를
+   주입받는다. GP 케이스에서 코드 수정 없이 붙도록. if 분기 금지.
+4. preview 자료구조(get_preview 반환)를 MPC 파라미터로 어떻게 넘길지 먼저 합의.
+
+## Phase 2 산출물 메모
+
+- 세그먼트 스키마 = {length, kappa_end}. 시작곡률=이전끝(0에서 출발) → C0 연속 자동.
+  kappa(s)는 np.interp 한 줄. single_curve 140m, dlc 126m.
+- dlc 최대 횡변위 8.5m (실차선보다 큼) — Phase 5에서 잔차 SNR 보고 재조정 예정.
+- `Reference(path_cfg, vx_range)` — vx_range는 차량 config에서 주입 (경로 속성 아님).
 
 ## 절대 하지 말 것
 

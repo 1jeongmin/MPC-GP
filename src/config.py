@@ -134,6 +134,65 @@ class SimConfig:
         )
 
 
+@dataclass(frozen=True)
+class PathSegment:
+    """경로 세그먼트. 끝점 곡률만 갖는다 (시작 곡률 = 직전 세그먼트 끝점).
+
+    length [m], kappa_end [1/m] (좌회전 +, 우회전 -). label 은 가독성용.
+    """
+    length: float
+    kappa_end: float
+    label: str = ""
+
+
+@dataclass(frozen=True)
+class PathConfig:
+    """호길이 곡률 프로파일 kappa(s) 정의.
+
+    단위: a_y_max [m/s^2], kappa_eps [1/m], segments (length [m], kappa_end [1/m]).
+    첫 세그먼트의 시작 곡률은 0으로 가정한다 (직선에서 출발).
+    kappa_max 는 참고용 메타데이터로 빌더는 사용하지 않는다.
+    """
+    a_y_max: float
+    kappa_eps: float
+    segments: tuple[PathSegment, ...]
+    kappa_max: float | None = None
+
+    def __post_init__(self) -> None:
+        if not (self.a_y_max > 0.0):
+            raise ValueError(f"a_y_max 는 양수여야 한다 (got {self.a_y_max}).")
+        if not (self.kappa_eps > 0.0):
+            raise ValueError(f"kappa_eps 는 양수여야 한다 (got {self.kappa_eps}).")
+        if len(self.segments) == 0:
+            raise ValueError("segments 가 비어 있다.")
+        for i, seg in enumerate(self.segments):
+            if not (seg.length > 0.0):
+                raise ValueError(f"segments[{i}].length 는 양수여야 한다 (got {seg.length}).")
+
+    @property
+    def total_length(self) -> float:
+        """경로 총 호길이 [m]."""
+        return float(sum(seg.length for seg in self.segments))
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "PathConfig":
+        segs = tuple(
+            PathSegment(
+                length=float(s["length"]),
+                kappa_end=float(s["kappa_end"]),
+                label=str(s.get("label", "")),
+            )
+            for s in d["segments"]
+        )
+        kmax = d.get("kappa_max")
+        return cls(
+            a_y_max=float(d["a_y_max"]),
+            kappa_eps=float(d["kappa_eps"]),
+            segments=segs,
+            kappa_max=None if kmax is None else float(kmax),
+        )
+
+
 def _dataclass_to_plain(obj: Any) -> dict[str, Any]:
     """dataclass -> 순수 dict (tuple 등을 YAML/JSON 친화 형태로)."""
     d = asdict(obj)
@@ -168,6 +227,7 @@ class ExperimentConfig:
 _GROUP_LOADERS = {
     "vehicle": VehicleConfig.from_dict,
     "sim": SimConfig.from_dict,
+    "path": PathConfig.from_dict,
 }
 
 

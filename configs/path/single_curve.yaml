@@ -1,0 +1,30 @@
+# 단일 커브 경로 — 곡률 프로파일 kappa(s).
+# 직선 -> 클로소이드(선형 증가) -> 일정곡률 -> 클로소이드(선형 감소) -> 직선.
+# 계단형 kappa 금지 (.claude/rules/sim-experiment.md 경로 표현).
+#
+# R=50, a_y_max=4.0 프리셋 (2026-07-25 사용자 확정).
+# 일정곡률 구간 통과속도 vx_curve = sqrt(a_y_max/kappa_max) = sqrt(4.0/0.02) = 14.1 m/s
+# (sedan vx_range [5,25] 안).
+#
+# a_y_max 의 이중 의미 (프롬프트 Phase 2 주의):
+# 1. 명목 모델의 유효 한계. 우리 명목 모델은 *선형 타이어* 자전거이므로 구속은
+#    타이어 선형 영역이다 (건조 아스팔트 대략 a_y < 0.3~0.4 g). 운동학 자전거
+#    모델의 유효 한계(a_y < 0.5*mu*g, Polack et al. 2017, DOI 확인 안 됨)와
+#    혼동하지 마라. 우리는 운동학 모델을 쓰지 않는다.
+# 2. GP가 학습할 잔차 크기를 결정하는 손잡이. 너무 낮으면 선형 영역만 밟아
+#    잔차가 noise floor에 묻힌다. experiment config에서 override 가능하게 둔다.
+#
+# 세그먼트 스키마: 각 구간은 {length[m], kappa_end[1/m]} 로 끝점 곡률만 준다.
+# 시작 곡률 = 직전 구간의 kappa_end (첫 구간은 0에서 시작). 구간 내부는 선형(클로소이드).
+# 따라서 kappa(s)는 조각선형이고 연속이다. straight=끝점0, constant=시작·끝 동일.
+
+a_y_max: 4.0             # m/s^2, 횡가속도 상한 (속도 프로파일 결정)
+kappa_eps: 1.0e-4        # 1/m,  이 값 미만은 직선 취급 (vx_max 0-division 방어)
+kappa_max: 0.02          # 1/m,  참고용 (일정곡률 구간 곡률, R = 50 m)
+
+segments:
+  - {label: straight1, length: 20.0, kappa_end: 0.0}
+  - {label: clothoid_in, length: 30.0, kappa_end: 0.02}   # 0 -> kappa_max
+  - {label: constant, length: 40.0, kappa_end: 0.02}       # kappa_max 유지
+  - {label: clothoid_out, length: 30.0, kappa_end: 0.0}    # kappa_max -> 0
+  - {label: straight2, length: 20.0, kappa_end: 0.0}
