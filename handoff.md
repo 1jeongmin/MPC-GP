@@ -56,22 +56,28 @@
   limo tau≈0.010s (고유값 -119,-100, 과감쇠). limo Iz는 미식별 근사값.
 - `gamma_ss(sedan,15,0.02)=0.094675 rad/s` — 적분 대조 통과.
 
-## 다음에 먼저 할 일 — Phase 6+ 결정 (prompts.md STOP 지점)
+## 다음에 먼저 할 일 — Phase 6 구현
 
-Phase 5 숫자가 나왔으므로 이제 `handoff.md` 「미결 결정」 표를 채우고 Phase 6
-프롬프트를 작성한다. Phase 5 산출물 → 결정 대응:
+**Phase 6(증강 KF) 프롬프트는 `prompts.md`에 확정 기록됨** (2026-07-25). 다음은
+`prompts.md`의 「Phase 6 — 증강 KF 비교군」 입력 → 구현.
+작업 전 `.claude/rules/ekf-baseline.md` 를 먼저 Read.
 
-1. **GP 입력 축**: 산점도(`…_scatter.png`)에서 (v_y,gamma,delta) 구조 확인.
-   **v_x 포함 여부가 핵심 결정** — sedan single_curve에서 vx가 5~25로 변한다
-   (직선25/커브14). 잔차가 큰 커브 구간에서 vx 변동폭을 보고 정한다.
-   (룰: 차원 최소 유지가 목표. vx는 시나리오에서 실제 변할 때만 추가.)
-2. **GP 실험 a_y 영역**: 스윕상 a_y=4~6 (슬립 3.7~6.8°, 비포화). 결정 필요.
-3. **M(dictionary 크기)**: 산점도 커버리지 밀도 보고 후보 범위 결정.
-   solve당 커널 평가 N·M (4·N·M 아님).
-4. **GP 프레임워크**: GPyTorch vs 직접 구현. solve time 여유(현재 mean 9ms) 고려.
-5. **EKF 증강상태**: 잔차가 v_y·gamma에 실림 → 증강 대상 후보.
+**확정된 Phase 6 결정 (미결 표 #1·#2에서 이동):**
+- EKF 증강상태 = [v_y,gamma,e_psi,e_y,d_vy,d_gamma], 외란은 v_y·gamma에 (Phase 5 근거).
+- 측정 = 현실적 부분관측(gamma,e_psi,e_y 관측+잡음, v_y 미측정). 측정 모델 선형.
+- 비교군 = 증강 KF 단독. Part 1 = MPC only / MPC+KF / MPC+GP 3-way.
+- **엄밀히 EKF 아니라 LTV KF** (명목 선형). 정직히 명명. 실차 비선형측정 대비
+  전방호환(평균함수+야코비안 주입, ca.jacobian 자동). KF→EKF 변환은 필터코어
+  불변 + 네 함수 교체만 → 쉬움(확인됨).
+- 제어통합: 세 케이스 모두 완전상태 피드백(통제), 차이는 모델보정만. KF는 d_hat
+  주입(연속 외란, RK4 안), GP는 mean 주입(이산, RK4 밖).
 
-이 결정들을 확정해 「미결 결정」 표에서 옮긴 뒤 Phase 6(EKF) 프롬프트 작성.
+**Phase 7(GP) 착수 시 결정 (아직 미결):**
+- GP 입력 축: **v_x 포함 여부가 핵심** — sedan single_curve에서 vx 5~25 변동.
+  잔차 큰 커브 구간의 vx 변동폭 보고 정한다. (차원 최소 유지가 목표.)
+- GP 실험 a_y 영역: 스윕상 a_y=4~6 (슬립 3.7~6.8°, 비포화) 후보.
+- M(dictionary 크기): 산점도 커버리지(1D 매니폴드) 보고 후보. 커널평가 N·M.
+- GP 프레임워크: GPyTorch vs 직접 구현. solve 여유 mean 9ms 고려.
 
 ## Phase 5 산출물 메모
 
