@@ -43,7 +43,7 @@ def test_augmented_system_observable(sedan) -> None:
     for vx in (5.0, 15.0, 25.0):
         A = A_matrix(sedan, vx)
         Aa = np.zeros((6, 6)); Aa[:4, :4] = A; Aa[0, 4] = 1.0; Aa[1, 5] = 1.0
-        H = np.zeros((3, 6))
+        H = np.zeros((len(MEAS_ROWS), 6))
         for i, r in enumerate(MEAS_ROWS):
             H[i, r] = 1.0
         O = np.vstack([H @ np.linalg.matrix_power(Aa, i) for i in range(6)])
@@ -76,8 +76,8 @@ def test_dhat_tracks_true_disturbance_noiseless(sedan, ekf_cfg) -> None:
         xd = f_nom(x, u, vx, kappa)
         return xd + np.array([d_true[0], d_true[1], 0.0, 0.0])
 
-    # 잡음 거의 0 인 KF.
-    cfg0 = replace(ekf_cfg, R_kf_diag=(1e-12, 1e-12, 1e-12))
+    # 잡음 거의 0 인 KF (전상태 측정 4채널).
+    cfg0 = replace(ekf_cfg, R_kf_diag=(1e-12, 1e-12, 1e-12, 1e-12))
     kf = make_augmented_kf(sedan, cfg0, dt)
     from src.models.integrators import plant_step
     rng = np.random.default_rng(0)
@@ -98,28 +98,38 @@ def test_dhat_tracks_true_disturbance_noiseless(sedan, ekf_cfg) -> None:
 # --------------------------------------------------------------------------- #
 # 폐루프 통합 + 로깅                                                            #
 # --------------------------------------------------------------------------- #
-def test_kf_closed_loop_logs_and_reduces_residual(sedan, ekf_cfg) -> None:
-    """비선형 플랜트 폐루프에서 KF 로깅이 되고, d_hat 주입이 예측 잔차를 줄인다."""
+def test_kf_beats_mpc_only(sedan, ekf_cfg) -> None:
+    """핵심 게이트: 비선형 플랜트에서 MPC+KF 추종오차 < MPC-only.
+
+    KF 는 MPC 를 돕는 기술이므로 단독 MPC 보다 나아야 한다. 나빠지면 설계 오류
+    (부분관측·저 Q_d 등). 여기서 멈추고 원인을 보고하라.
+    """
+    from src.control.mpc_nominal import make_nominal_mpc
+    from src.eval.metrics import compute_metrics
     mpc_cfg = load_group("mpc", "default")
-    sim = replace(load_group("sim", "default"), duration=7.0)
+    sim = replace(load_group("sim", "default"), duration=10.0)
     path = load_group("path", "single_curve")
     reference = Reference(path, sedan.vx_range)
     plant_nl = make_nonlinear_rhs_np(sedan)
     nominal_step = build_step_function(NominalStepModel(sedan, sim.dt_ctrl))
-    rng = np.random.default_rng(0)
+    NF = {"v_y": 9.57e-9}
 
+    # MPC only
+    ctl0 = make_nominal_mpc(sedan, mpc_cfg, sim.dt_ctrl)
+    e0 = compute_metrics(run_closed_loop(ctl0, reference, plant_nl, nominal_step, sim),
+                         sedan, sim.dt_ctrl, NF)["tracking"]["rms_e_y"]
+    # MPC + KF
     kf = make_augmented_kf(sedan, ekf_cfg, sim.dt_ctrl)
-    controller = make_kf_mpc(sedan, mpc_cfg, sim.dt_ctrl, kf)
-    log = run_closed_loop(controller, reference, plant_nl, nominal_step, sim,
-                          estimator=kf, rng=rng)
+    ctl1 = make_kf_mpc(sedan, mpc_cfg, sim.dt_ctrl, kf)
+    log = run_closed_loop(ctl1, reference, plant_nl, nominal_step, sim,
+                          estimator=kf, rng=np.random.default_rng(0))
+    e1 = compute_metrics(log, sedan, sim.dt_ctrl, NF)["tracking"]["rms_e_y"]
+
+    assert e1 < e0, f"MPC+KF({e1:.3e}) 가 MPC-only({e0:.3e}) 보다 나쁘다"
 
     # 로깅 확인.
     for key in ("ekf_P_diag", "ekf_innovation", "ekf_d_hat", "ekf_x_hat"):
         assert key in log, f"{key} 가 로깅되지 않았다"
-    assert log["ekf_P_diag"].shape[1] == 6
-    assert log["ekf_d_hat"].shape[1] == 2
-    assert np.all(np.isfinite(log["ekf_P_diag"]))
-
-    # d_hat 이 커브에서 실제 외란 방향으로 움직였는지 (0 이 아니게).
-    assert np.max(np.abs(log["ekf_d_hat"])) > 1e-2, "d_hat 이 거의 0 (외란 추정 실패)"
+    assert log["ekf_P_diag"].shape[1] == 6 and log["ekf_d_hat"].shape[1] == 2
+    assert np.max(np.abs(log["ekf_d_hat"])) > 1e-2
     assert np.all(log["converged"].astype(bool))

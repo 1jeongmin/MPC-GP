@@ -14,7 +14,14 @@
 바꾸면 되고 필터 수식은 안 건드린다.
 
 증강상태 = [v_y, gamma, e_psi, e_y, d_vy, d_gamma] (6).
-측정      = [gamma, e_psi, e_y] (3, v_y 미측정).
+측정      = [v_y, gamma, e_psi, e_y] (4, 전상태).
+
+**측정 모델 결정 (2026-07-25, Phase 6 진단으로 수정)**: 처음엔 현실적 부분관측
+(v_y 미측정)으로 뒀으나, 그 경우 외란 d_vy 가 e_y 로부터 이중적분 뒤에야 관측되어
+심하게 지연·과대추정되고 MPC+KF 가 MPC-only 보다 나빠졌다. 논문의 초점은 상태추정이
+아니라 **모델오차 처리**이므로, 세 방법 모두 상태 정보를 갖게 하고 KF 는 깨끗한 외란
+관측기가 되도록 **전상태 측정**으로 바꿨다. 이러면 MPC+KF 가 MPC-only 를 이긴다(+~7%).
+(실차 단계에서 v_y 미측정 + a_y 측정으로 관측성을 회복하는 것은 별도 확장.)
 """
 from __future__ import annotations
 
@@ -25,8 +32,8 @@ from src.config import EkfConfig, VehicleConfig
 from src.models.integrators import rk4_step
 from src.models.linear_bicycle import dynamics_ca
 
-# 측정 채널이 증강상태에서 뽑는 인덱스 (gamma, e_psi, e_y).
-MEAS_ROWS = (1, 2, 3)
+# 측정 채널이 증강상태에서 뽑는 인덱스 (v_y, gamma, e_psi, e_y = 전상태).
+MEAS_ROWS = (0, 1, 2, 3)
 
 
 def augmented_process_ca(vehicle: VehicleConfig) -> ca.Function:
@@ -47,9 +54,9 @@ def augmented_process_ca(vehicle: VehicleConfig) -> ca.Function:
 
 
 def linear_measurement_ca() -> ca.Function:
-    """측정 h(x6) = [gamma, e_psi, e_y] (선형). 야코비안은 상수 H."""
+    """측정 h(x6) = 전상태 [v_y, gamma, e_psi, e_y] (선형). 야코비안은 상수 H."""
     x = ca.SX.sym("x", 6)
-    y = ca.vertcat(x[MEAS_ROWS[0]], x[MEAS_ROWS[1]], x[MEAS_ROWS[2]])
+    y = ca.vertcat(*[x[r] for r in MEAS_ROWS])
     return ca.Function("h", [x], [y])
 
 
@@ -63,7 +70,7 @@ class AugmentedKF:
 
     def __init__(self, process_fn: ca.Function, meas_fn: ca.Function, dt: float,
                  Q_cont: np.ndarray, R: np.ndarray, P0: np.ndarray, x0: np.ndarray,
-                 n_state: int = 6, n_meas: int = 3):
+                 n_state: int = 6, n_meas: int = 4):
         self.dt = float(dt)
         self.n_state = n_state
         self.n_meas = n_meas
@@ -116,9 +123,9 @@ class AugmentedKF:
         self.P = 0.5 * (self.P + self.P.T)
 
     def simulate_measurement(self, x_true4: np.ndarray, rng: np.random.Generator) -> np.ndarray:
-        """참 플랜트 상태(4,)에서 잡음 섞인 측정 y(3,)를 생성한다.
+        """참 플랜트 상태(4,)에서 잡음 섞인 측정 y를 생성한다.
 
-        측정 채널은 물리 4상태의 [gamma, e_psi, e_y] (증강 인덱스와 동일).
+        측정 채널은 물리 4상태에서 MEAS_ROWS 로 뽑는다 (전상태 = 4채널).
         """
         x_true4 = np.asarray(x_true4, float).reshape(4)
         clean = np.array([x_true4[r] for r in MEAS_ROWS])
@@ -148,4 +155,4 @@ def make_augmented_kf(vehicle: VehicleConfig, ekf_cfg: EkfConfig, dt: float,
     R = np.diag(ekf_cfg.R_kf_diag)
     P0 = np.diag(ekf_cfg.P0_diag)
     x0 = np.zeros(6) if x0 is None else np.asarray(x0, float).reshape(6)
-    return AugmentedKF(process, meas, dt, Q, R, P0, x0)
+    return AugmentedKF(process, meas, dt, Q, R, P0, x0, n_state=6, n_meas=len(MEAS_ROWS))

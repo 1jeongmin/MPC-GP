@@ -282,11 +282,11 @@ class EkfConfig:
     """증강 KF 설정 (.claude/rules/ekf-baseline.md).
 
     증강상태 순서 = [v_y, gamma, e_psi, e_y, d_vy, d_gamma] (6).
-    측정 = [gamma, e_psi, e_y] (3, v_y 미측정).
+    측정 = [v_y, gamma, e_psi, e_y] (4, 전상태 — Phase 6 진단으로 부분관측에서 수정).
     이름은 MPC 가중치(W_/R_)와 절대 겹치지 않게: Q_kf, R_kf (mpc-solver.md 표기 충돌).
 
     Q_kf_diag: 프로세스 잡음 연속 공분산 대각(6). 예측에서 *dt 이산화.
-    R_kf_diag: 측정 잡음 공분산 대각(3).
+    R_kf_diag: 측정 잡음 공분산 대각(4).
     P0_diag: 초기 추정 공분산 대각(6).
     """
     Q_kf_diag: tuple[float, ...]
@@ -297,8 +297,8 @@ class EkfConfig:
     def __post_init__(self) -> None:
         if len(self.Q_kf_diag) != 6:
             raise ValueError(f"Q_kf_diag 는 길이 6 (got {len(self.Q_kf_diag)}).")
-        if len(self.R_kf_diag) != 3:
-            raise ValueError(f"R_kf_diag 는 길이 3 (got {len(self.R_kf_diag)}).")
+        if len(self.R_kf_diag) != 4:
+            raise ValueError(f"R_kf_diag 는 길이 4 (got {len(self.R_kf_diag)}).")
         if len(self.P0_diag) != 6:
             raise ValueError(f"P0_diag 는 길이 6 (got {len(self.P0_diag)}).")
         for name in ("Q_kf_diag", "R_kf_diag", "P0_diag"):

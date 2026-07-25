@@ -8,10 +8,11 @@
 
 - 2026-07-25 — **Phase 0~6 완료.** 전체 테스트 **45개 통과**. Phase 6: 증강 KF
   비교군(ekf.py, DisturbanceStepModel, runner estimator 확장, Part1 configs).
-- KF 검증: 가관측(rank 6), 무잡음 극한 d_hat→참외란 수렴, 매칭 평균 d_hat≈0(편향無),
-  KF≡EKF(야코비안 상수), P·innovation 로깅. StepModel로 d_hat 연속외란 주입(RK4 안).
-- **예비 발견(정직)**: 미튜닝 MPC+KF는 추종 개선 못함(−18%). 원인은 전이 스파이크 +
-  상태의존 외란의 지평 상수외삽 한계 → **Part 1 논점 미리보기**. 공정튜닝=Phase 8.
+- KF 검증: 가관측(rank 6), 무잡음 d_hat→참외란, KF≡EKF, P·innovation 로깅.
+  **핵심 게이트 test_kf_beats_mpc_only: MPC+KF RMS e_y +5.8% (MPC-only 이김).**
+- **진단 해결**: 처음 −18%(악화) → 원인은 **부분관측(v_y 미측정)**이 d_vy 관측을
+  이중적분 뒤로 밀어 지연·과대추정. 오라클(참 외란 상수외삽)은 +7.3%로 개념 정상
+  확인 → **전상태 측정 + Q_d↑로 수정 → +5.8%**. (앞 결정 "부분관측"을 뒤집음.)
 
 ## Phase 5 특성화 결과 (GP 설계 입력 — 숫자를 보고 Phase 6+ 결정)
 
@@ -64,22 +65,28 @@ extra_param_dim>0, step=rk4+B_d@mu_GP, 이산 주입 RK4 밖), part1_gp.yaml.
 
 ## Phase 6 산출물 메모
 
-- **KF는 올바르나 미튜닝**: 무잡음 d_hat→참외란, 매칭 평균 d_hat≈0. 기본 Q/R은
-  정상값이나 공정 비교용 아님 → Phase 8에서 GP와 같은 튜닝예산으로 재튜닝·기록.
-- **예비 성능**: MPC+KF 추종 RMS e_y 9.6→11.3mm(−18%). 어떤 Q/R로도 개선 안 됨
-  (스윕 확인) → 튜닝 아티팩트 아니라 근본 한계. d_hat은 corr 0.69로 방향 맞으나
-  상수 지평외삽이라 상태의존·빠른 외란을 앞서 못 봄. Part 1에서 GP가 이길 지점.
+- **측정 = 전상태 [v_y,gamma,e_psi,e_y]로 확정** (앞선 "부분관측" 뒤집음). 근거 아래.
+- **왜 부분관측이 실패했나 (탐구 결론)**: d_vy 는 e_y 로부터 이중적분 뒤에야 관측
+  → v_y 미측정이면 심한 지연·과대추정(d_hat 2.0 vs 참 0.65~1.3) → MPC+KF −18%.
+  판별실험: 오라클(참 순간외란, 상수외삽) MPC = **+7.3%**(개념 정상). H3(참상태
+  잔차 LPF) +9.2%. 부분관측 x_hat 피드백은 발산(v_y lag). → 전상태 측정 + Q_d↑
+  = **+5.8%**(오라클 근접). max|e_y|는 −16%(전이 스파이크, Phase 8 튜닝).
+- **논문 논리 유지**: KF 가 MPC 를 도움(+5.8%). GP 는 외란을 지평에서 d(x)로 예측해
+  상수외삽 상한(+7.3%)을 넘을 것 → GP > KF > MPC-only.
 - **StepModel 재확인**: KF(연속 d_hat, RK4 안) / GP(이산 mean, RK4 밖) 둘 다 수용.
-- **전방호환**: ekf.py는 평균함수+야코비안 주입 구조. 실차 비선형측정 시 process/meas
-  함수만 교체(ca.jacobian 자동). KF≡EKF 테스트로 현재 선형임 확인.
+- **전방호환**: ekf.py는 평균함수+야코비안 주입. 실차 비선형측정 시 process/meas
+  함수만 교체(ca.jacobian 자동). KF≡EKF 테스트로 현재 선형 확인.
 - **Part 8 주그림 데이터**: runner가 (ekf_x_hat, ekf_P_diag, ekf_d_hat, ekf_innovation)
   궤적 로깅. GP 사후 std vs KF P d-블록 비교 준비됨.
+- **공정 튜닝은 Phase 8**: 현재 Q/R은 MPC+KF 가 이기는 정상값이나 GP 와 같은 예산의
+  최종 튜닝은 Phase 8.
 
 ## 결정 기록 (Phase 6 확정 / Phase 7 미결)
 
 **확정된 Phase 6 결정 (미결 표 #1·#2에서 이동):**
 - EKF 증강상태 = [v_y,gamma,e_psi,e_y,d_vy,d_gamma], 외란은 v_y·gamma에 (Phase 5 근거).
-- 측정 = 현실적 부분관측(gamma,e_psi,e_y 관측+잡음, v_y 미측정). 측정 모델 선형.
+- 측정 = **전상태(v_y,gamma,e_psi,e_y)+잡음** (Phase 6 진단으로 부분관측에서 수정 —
+  부분관측은 d_vy 관측지연으로 MPC+KF를 악화시킴). 측정 모델 선형.
 - 비교군 = 증강 KF 단독. Part 1 = MPC only / MPC+KF / MPC+GP 3-way.
 - **엄밀히 EKF 아니라 LTV KF** (명목 선형). 정직히 명명. 실차 비선형측정 대비
   전방호환(평균함수+야코비안 주입, ca.jacobian 자동). KF→EKF 변환은 필터코어
