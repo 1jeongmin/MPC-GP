@@ -1,0 +1,8 @@
+# 모델 불일치 케이스: 플랜트=비선형(Fiala), MPC 예측모델=선형(명목).
+# 잔차의 출처는 타이어 비선형성 하나뿐이다 (오차 기구학은 양쪽 동일).
+# 플랜트 비선형 여부는 스크립트(run_mismatch.py)에서 주입한다.
+# a_y_max 스윕은 run_mismatch.py 가 path.a_y_max 를 override 해서 수행한다.
+vehicle: sedan
+sim: default
+path: single_curve
+mpc: default

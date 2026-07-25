@@ -46,11 +46,30 @@ class VehicleConfig:
     delta_max: float
     delta_rate_max: float
     vx_range: tuple[float, float]
+    # 비선형 플랜트(Phase 5)용. 선형 명목 모델에는 불필요하므로 선택적.
+    mu: float | None = None      # 노면 마찰계수 [-]
+    g: float = 9.81              # 중력가속도 [m/s^2]
 
     @property
     def L(self) -> float:
         """축거 a + b [m]."""
         return self.a + self.b
+
+    @property
+    def Fzf(self) -> float:
+        """전축 정적 수직하중 [N] = m*g*b/L (무게 분배)."""
+        return self.m * self.g * self.b / self.L
+
+    @property
+    def Fzr(self) -> float:
+        """후축 정적 수직하중 [N] = m*g*a/L."""
+        return self.m * self.g * self.a / self.L
+
+    def require_mu(self) -> float:
+        """mu 가 설정돼 있으면 반환, 아니면 예외 (비선형 플랜트 사용 시)."""
+        if self.mu is None or not (self.mu > 0.0):
+            raise ValueError("비선형 플랜트에는 config 에 양수 mu 가 필요하다.")
+        return self.mu
 
     def __post_init__(self) -> None:
         # 물리 파라미터는 전부 양수여야 한다.
@@ -89,6 +108,8 @@ class VehicleConfig:
             delta_max=float(d["delta_max"]),
             delta_rate_max=float(d["delta_rate_max"]),
             vx_range=(float(d["vx_range"][0]), float(d["vx_range"][1])),
+            mu=None if d.get("mu") is None else float(d["mu"]),
+            g=float(d.get("g", 9.81)),
         )
 
 

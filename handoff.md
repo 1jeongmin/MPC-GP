@@ -6,12 +6,39 @@
 
 ## 오늘 한 일 (3줄)
 
-- 2026-07-25 — **Phase 0~4 완료.** 전체 테스트 **30개 통과** (게이트 1·2·2b·3·5·6·8
-  + Phase 4 완전일치 잔차).
-- Phase 4: 다중레이트 폐루프(`runner`, 플랜트 주입), `logger`, `metrics`, `plots`,
-  `run_sim.py`. 모델완전일치 잔차 = noise floor 자릿수 검증 통과.
-- sedan matched: 잔차 2.6~9.2× floor(1e-8~1e-10), 추종 RMS e_y=7.8mm,
-  solve mean 9.2ms(<20ms), dt초과 0%, 수렴실패 0%.
+- 2026-07-25 — **Phase 0~5 완료.** 전체 테스트 **41개 통과**. Phase 5: Fiala 비선형
+  플랜트 + 잔차 특성화(GP 설계의 입력). **prompts.md 설계상 여기서 멈춤 — Phase 6+
+  결정 대기.**
+- tire.py(Fiala, np/ca 대조), nonlinear_bicycle.py(타이어만 교체, 기구학 불변),
+  run_mismatch.py(SNR·a_y스윕·산점도). 최우선 게이트 dFy/dα→C_α 통과.
+- **핵심 발견**: 기구학 채널 잔차 = 0.5·dt × 동적 잔차 (검증됨). 독립 정보 아님
+  → GP가 v_y·gamma만 학습하는 설계 검증. gp-residual.md 진단기준 정정함.
+
+## Phase 5 특성화 결과 (GP 설계 입력 — 숫자를 보고 Phase 6+ 결정)
+
+**sedan mismatch, a_y_max=4.0, single_curve, 잔차 SNR = RMS/noise_floor:**
+
+| 채널 | 잔차 RMS | SNR | 비고 |
+|---|---|---|---|
+| v_y   | 1.30e-2 | ×1.36M | GP 학습 대상. 강한 신호 |
+| gamma | 1.21e-3 | ×1.33M | GP 학습 대상 |
+| e_psi | 1.26e-5 | ×68k | = 0.5·dt·r_gamma (종속) |
+| e_y   | 1.33e-4 | ×235k | = 0.5·dt·r_vy (종속) |
+
+**a_y_max 스윕 (SNR 단조 증가, 슬립각으로 타이어 작동영역 확인):**
+
+| a_y | SNR(v_y) | SNR(gamma) | max\|α_f\| |
+|---|---|---|---|
+| 1.0 | ×70k | ×53k | 0.74° |
+| 4.0 | ×1.36M | ×1.33M | 3.68° |
+| 6.0 | ×3.86M | ×4.87M | 6.85° |
+| 7.0 | ×6.56M | ×13.0M | 9.99° |
+
+(alpha_sl≈15.4°. a_y=4~6이 비선형-비포화 영역, GP 실험 후보.)
+
+- **limo**: single_curve에서 1 m/s 크롤 → 20s에 s=20m(커브 진입 못함), 슬립 0°,
+  타이어 선형 → GP 신호 없음. limo 전용 경로 + 파라미터 식별 필요(미룸).
+- 산점도: `results/mismatch_sedan_*/…_scatter.png` — (v_y,gamma,delta) 커버리지.
 
 ## 측정값 (기준선 — 이후 잔차 해석에 사용)
 
@@ -29,17 +56,29 @@
   limo tau≈0.010s (고유값 -119,-100, 과감쇠). limo Iz는 미식별 근사값.
 - `gamma_ss(sedan,15,0.02)=0.094675 rad/s` — 적분 대조 통과.
 
-## 다음에 먼저 할 일
+## 다음에 먼저 할 일 — Phase 6+ 결정 (prompts.md STOP 지점)
 
-1. `prompts.md`의 **Phase 5 프롬프트** 입력 (비선형 플랜트 + 잔차 특성화).
-   **여기서 처음으로 실제 모델 불일치를 만든다. GP 설계의 입력이 되는 산출물.**
-   작업 전 `.claude/rules/vehicle-model.md`, `gp-residual.md` 를 먼저 Read.
-2. `src/models/tire.py`(Fiala, 출처 확인·명시), `tests/test_tire.py`(alpha→0
-   극한 dFy/dalpha→C_alpha 가 최우선 게이트), `src/models/nonlinear_bicycle.py`
-   (**타이어만 교체, 오차기구학 절대 불변**), `configs/experiment/mismatch_*.yaml`.
-3. **진짜 산출물**: 채널별 잔차 SNR(=잔차/noise floor 배율), a_y_max 스윕별 SNR
-   곡선, (v_y,gamma,delta) 산점도 커버리지. → GP 입력·M·수집 시나리오 결정 근거.
-4. runner 는 이미 plant_rhs 주입식 → 비선형 플랜트를 넣어도 runner 수정 없음.
+Phase 5 숫자가 나왔으므로 이제 `handoff.md` 「미결 결정」 표를 채우고 Phase 6
+프롬프트를 작성한다. Phase 5 산출물 → 결정 대응:
+
+1. **GP 입력 축**: 산점도(`…_scatter.png`)에서 (v_y,gamma,delta) 구조 확인.
+   **v_x 포함 여부가 핵심 결정** — sedan single_curve에서 vx가 5~25로 변한다
+   (직선25/커브14). 잔차가 큰 커브 구간에서 vx 변동폭을 보고 정한다.
+   (룰: 차원 최소 유지가 목표. vx는 시나리오에서 실제 변할 때만 추가.)
+2. **GP 실험 a_y 영역**: 스윕상 a_y=4~6 (슬립 3.7~6.8°, 비포화). 결정 필요.
+3. **M(dictionary 크기)**: 산점도 커버리지 밀도 보고 후보 범위 결정.
+   solve당 커널 평가 N·M (4·N·M 아님).
+4. **GP 프레임워크**: GPyTorch vs 직접 구현. solve time 여유(현재 mean 9ms) 고려.
+5. **EKF 증강상태**: 잔차가 v_y·gamma에 실림 → 증강 대상 후보.
+
+이 결정들을 확정해 「미결 결정」 표에서 옮긴 뒤 Phase 6(EKF) 프롬프트 작성.
+
+## Phase 5 산출물 메모
+
+- 잔차 계산은 항상 **명목** 대비. 비선형은 plant_rhs 주입만 (runner 무수정).
+- Fiala: z=tan(clip(α,±α_sl)) 단일 큐빅 → 경계밖 자동 포화·C1연속, if_else 불필요.
+- **기구학 채널 진단**: 매칭은 10×floor 규칙, 불일치는 0.5·dt 비례관계 이탈로 판정
+  (gp-residual.md 정정 반영). 절대크기로 버그 판정 금지.
 
 ## Phase 4 산출물 메모
 

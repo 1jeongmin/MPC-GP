@@ -16,3 +16,5 @@ Cr: 200.0             # N/rad   (TODO: 동일)
 delta_max: 0.5        # rad     (TODO: 실제 조향 한계 확인 필요)
 delta_rate_max: 2.0   # rad/s   (TODO)
 vx_range: [0.2, 1.0]  # m/s     하한이 특히 빡빡하다 (특이점 vx->0 방어)
+mu: 0.6               # -       (TODO: 실내 바닥 마찰 추정치. 근거 없음, 식별 필요)
+g: 9.81               # m/s^2
