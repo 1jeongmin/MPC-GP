@@ -1,0 +1,6 @@
+# Part 1 케이스 1: MPC only (보정 없음). 플랜트 비선형(스크립트 주입).
+# part1_kf / part1_gp 와 통제변수(경로·IC·seed·N·가중치·IPOPT·플랜트·a_y) 동일.
+vehicle: sedan
+sim: default
+path: single_curve
+mpc: default

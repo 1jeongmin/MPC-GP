@@ -277,6 +277,44 @@ class MpcConfig:
         )
 
 
+@dataclass(frozen=True)
+class EkfConfig:
+    """증강 KF 설정 (.claude/rules/ekf-baseline.md).
+
+    증강상태 순서 = [v_y, gamma, e_psi, e_y, d_vy, d_gamma] (6).
+    측정 = [gamma, e_psi, e_y] (3, v_y 미측정).
+    이름은 MPC 가중치(W_/R_)와 절대 겹치지 않게: Q_kf, R_kf (mpc-solver.md 표기 충돌).
+
+    Q_kf_diag: 프로세스 잡음 연속 공분산 대각(6). 예측에서 *dt 이산화.
+    R_kf_diag: 측정 잡음 공분산 대각(3).
+    P0_diag: 초기 추정 공분산 대각(6).
+    """
+    Q_kf_diag: tuple[float, ...]
+    R_kf_diag: tuple[float, ...]
+    P0_diag: tuple[float, ...]
+    tuning_method: str = "manual"   # 공정성: 튜닝 방식 명시 (ekf-baseline.md)
+
+    def __post_init__(self) -> None:
+        if len(self.Q_kf_diag) != 6:
+            raise ValueError(f"Q_kf_diag 는 길이 6 (got {len(self.Q_kf_diag)}).")
+        if len(self.R_kf_diag) != 3:
+            raise ValueError(f"R_kf_diag 는 길이 3 (got {len(self.R_kf_diag)}).")
+        if len(self.P0_diag) != 6:
+            raise ValueError(f"P0_diag 는 길이 6 (got {len(self.P0_diag)}).")
+        for name in ("Q_kf_diag", "R_kf_diag", "P0_diag"):
+            if any(v < 0.0 for v in getattr(self, name)):
+                raise ValueError(f"EkfConfig.{name} 성분은 음수가 아니어야 한다.")
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "EkfConfig":
+        return cls(
+            Q_kf_diag=tuple(float(v) for v in d["Q_kf_diag"]),
+            R_kf_diag=tuple(float(v) for v in d["R_kf_diag"]),
+            P0_diag=tuple(float(v) for v in d["P0_diag"]),
+            tuning_method=str(d.get("tuning_method", "manual")),
+        )
+
+
 def _dataclass_to_plain(obj: Any) -> dict[str, Any]:
     """dataclass -> 순수 dict (tuple 등을 YAML/JSON 친화 형태로)."""
     d = asdict(obj)
@@ -294,6 +332,7 @@ class ExperimentConfig:
     sim: SimConfig
     path: "PathConfig | None" = None
     mpc: "MpcConfig | None" = None
+    ekf: "EkfConfig | None" = None
     # 조합 파일이 참조한 그룹 이름 -> config 이름 (재현성 스냅샷에 남긴다).
     raw_refs: dict[str, str] = field(default_factory=dict)
 
@@ -310,6 +349,8 @@ class ExperimentConfig:
             snap["path"] = _dataclass_to_plain(self.path)
         if self.mpc is not None:
             snap["mpc"] = _dataclass_to_plain(self.mpc)
+        if self.ekf is not None:
+            snap["ekf"] = _dataclass_to_plain(self.ekf)
         return snap
 
 
@@ -320,6 +361,7 @@ _GROUP_LOADERS = {
     "sim": SimConfig.from_dict,
     "path": PathConfig.from_dict,
     "mpc": MpcConfig.from_dict,
+    "ekf": EkfConfig.from_dict,
 }
 
 
@@ -360,5 +402,6 @@ def load_experiment(name: str, configs_dir: Path = CONFIGS_DIR) -> ExperimentCon
         sim=load_group("sim", refs["sim"], configs_dir),
         path=load_group("path", refs["path"], configs_dir) if "path" in refs else None,
         mpc=load_group("mpc", refs["mpc"], configs_dir) if "mpc" in refs else None,
+        ekf=load_group("ekf", refs["ekf"], configs_dir) if "ekf" in refs else None,
         raw_refs=refs,
     )

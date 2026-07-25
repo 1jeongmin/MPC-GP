@@ -6,13 +6,12 @@
 
 ## 오늘 한 일 (3줄)
 
-- 2026-07-25 — **Phase 0~5 완료.** 전체 테스트 **41개 통과**. Phase 5: Fiala 비선형
-  플랜트 + 잔차 특성화(GP 설계의 입력). **prompts.md 설계상 여기서 멈춤 — Phase 6+
-  결정 대기.**
-- tire.py(Fiala, np/ca 대조), nonlinear_bicycle.py(타이어만 교체, 기구학 불변),
-  run_mismatch.py(SNR·a_y스윕·산점도). 최우선 게이트 dFy/dα→C_α 통과.
-- **핵심 발견**: 기구학 채널 잔차 = 0.5·dt × 동적 잔차 (검증됨). 독립 정보 아님
-  → GP가 v_y·gamma만 학습하는 설계 검증. gp-residual.md 진단기준 정정함.
+- 2026-07-25 — **Phase 0~6 완료.** 전체 테스트 **45개 통과**. Phase 6: 증강 KF
+  비교군(ekf.py, DisturbanceStepModel, runner estimator 확장, Part1 configs).
+- KF 검증: 가관측(rank 6), 무잡음 극한 d_hat→참외란 수렴, 매칭 평균 d_hat≈0(편향無),
+  KF≡EKF(야코비안 상수), P·innovation 로깅. StepModel로 d_hat 연속외란 주입(RK4 안).
+- **예비 발견(정직)**: 미튜닝 MPC+KF는 추종 개선 못함(−18%). 원인은 전이 스파이크 +
+  상태의존 외란의 지평 상수외삽 한계 → **Part 1 논점 미리보기**. 공정튜닝=Phase 8.
 
 ## Phase 5 특성화 결과 (GP 설계 입력 — 숫자를 보고 Phase 6+ 결정)
 
@@ -56,11 +55,27 @@
   limo tau≈0.010s (고유값 -119,-100, 과감쇠). limo Iz는 미식별 근사값.
 - `gamma_ss(sedan,15,0.02)=0.094675 rad/s` — 적분 대조 통과.
 
-## 다음에 먼저 할 일 — Phase 6 구현
+## 다음에 먼저 할 일 — Phase 7 (offline GP)
 
-**Phase 6(증강 KF) 프롬프트는 `prompts.md`에 확정 기록됨** (2026-07-25). 다음은
-`prompts.md`의 「Phase 6 — 증강 KF 비교군」 입력 → 구현.
-작업 전 `.claude/rules/ekf-baseline.md` 를 먼저 Read.
+Phase 7 착수 시 GP 설계를 먼저 정한다 (handoff 아래 「결정 기록」). 그 뒤
+`src/gp/`(dataset, kernels, train_offline, casadi_export), `mpc_gp.py`(GPStepModel:
+extra_param_dim>0, step=rk4+B_d@mu_GP, 이산 주입 RK4 밖), part1_gp.yaml.
+작업 전 `.claude/rules/gp-residual.md` 를 먼저 Read.
+
+## Phase 6 산출물 메모
+
+- **KF는 올바르나 미튜닝**: 무잡음 d_hat→참외란, 매칭 평균 d_hat≈0. 기본 Q/R은
+  정상값이나 공정 비교용 아님 → Phase 8에서 GP와 같은 튜닝예산으로 재튜닝·기록.
+- **예비 성능**: MPC+KF 추종 RMS e_y 9.6→11.3mm(−18%). 어떤 Q/R로도 개선 안 됨
+  (스윕 확인) → 튜닝 아티팩트 아니라 근본 한계. d_hat은 corr 0.69로 방향 맞으나
+  상수 지평외삽이라 상태의존·빠른 외란을 앞서 못 봄. Part 1에서 GP가 이길 지점.
+- **StepModel 재확인**: KF(연속 d_hat, RK4 안) / GP(이산 mean, RK4 밖) 둘 다 수용.
+- **전방호환**: ekf.py는 평균함수+야코비안 주입 구조. 실차 비선형측정 시 process/meas
+  함수만 교체(ca.jacobian 자동). KF≡EKF 테스트로 현재 선형임 확인.
+- **Part 8 주그림 데이터**: runner가 (ekf_x_hat, ekf_P_diag, ekf_d_hat, ekf_innovation)
+  궤적 로깅. GP 사후 std vs KF P d-블록 비교 준비됨.
+
+## 결정 기록 (Phase 6 확정 / Phase 7 미결)
 
 **확정된 Phase 6 결정 (미결 표 #1·#2에서 이동):**
 - EKF 증강상태 = [v_y,gamma,e_psi,e_y,d_vy,d_gamma], 외란은 v_y·gamma에 (Phase 5 근거).
