@@ -94,12 +94,17 @@ extra_param_dim>0, step=rk4+B_d@mu_GP, 이산 주입 RK4 밖), part1_gp.yaml.
 - 제어통합: 세 케이스 모두 완전상태 피드백(통제), 차이는 모델보정만. KF는 d_hat
   주입(연속 외란, RK4 안), GP는 mean 주입(이산, RK4 밖).
 
-**Phase 7(GP) 착수 시 결정 (아직 미결):**
-- GP 입력 축: **v_x 포함 여부가 핵심** — sedan single_curve에서 vx 5~25 변동.
-  잔차 큰 커브 구간의 vx 변동폭 보고 정한다. (차원 최소 유지가 목표.)
-- GP 실험 a_y 영역: 스윕상 a_y=4~6 (슬립 3.7~6.8°, 비포화) 후보.
-- M(dictionary 크기): 산점도 커버리지(1D 매니폴드) 보고 후보. 커널평가 N·M.
-- GP 프레임워크: GPyTorch vs 직접 구현. solve 여유 mean 9ms 고려.
+**확정된 Phase 7 결정 (2026-07-25, prompts.md「Phase 7」에 기록):**
+- 입력 z = **[v_y, gamma, delta] (3D)**. v_x 제외 — 슬립각 민감도
+  d(alpha_f)/d(vx)~5e-4 rad/(m/s)라 v_x 독립기여 0.04°(무시). 차원 최소.
+- 채널 = v_y, gamma 독립 GP 2개. 커널 ARD RBF, Type-II ML(log-det 포함).
+- 프레임워크 = **직접 numpy/scipy exact GP** (torch 미사용).
+- 결합 = 이산 x_{k+1}=rk4(f_nom)+B_d@mu_GP(z), RK4 밖. mu_GP는 지평 예측상태에서
+  평가 → GP가 d(x)를 지평에서 예측(KF 상수 d_hat/오라클 상한 +7.3% 넘음).
+- 학습=single_curve a_y=4, 평가=a_y=6 & dlc(분포밖 사후분산 시연). M은 config.
+- 게이트: 게이트7 + 사후 std 단조증가 + numpy↔CasADi 일치 + MPC+GP<MPC+KF<only.
+
+**Phase 8+ 미결:** GP/KF 공정 튜닝예산, M 최종값(프로파일 후), 캘리브레이션 주지표.
 
 ## Phase 5 산출물 메모
 

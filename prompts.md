@@ -456,15 +456,83 @@ GP 사후 std vs KF P 의 d-블록 대각을 나란히 비교할 수 있도록, 
 
 **게이트**: `(A_aug, H)` 가관측. 잡음 없는 극한에서 `d_hat`이 실제 잔차 추종.
 `P` 대각·innovation 로깅. KF 가 선형(야코비안 상수)임을 대조로 확인.
+**MPC+KF 가 MPC-only 를 이긴다** (test_kf_beats_mpc_only).
 
 ---
 
-### Phase 7~10 로드맵 (프롬프트는 해당 Phase 착수 시)
+## Phase 7 — offline GP (Part 1)
+
+```
+Phase 7을 진행한다. offline GP 잔차 학습 -> CasADi 변환 -> mpc_gp 결합.
+먼저 .claude/rules/gp-residual.md 를 Read 해라.
+
+## 확정 결정 (2026-07-25, Phase 5 특성화·v_x 민감도 분석 근거)
+- 입력 z = [v_y, gamma, delta] (3D). v_x 제외: 잔차 유의구간에서 v_x 가 변하지만
+  슬립각 민감도 d(alpha_f)/d(vx)=(vy+a*gamma)/vx^2 ~= 5e-4 rad/(m/s) 라 v_x 의
+  독립 기여가 슬립각 0.04°(전체 1.3~3.7° 대비 무시) 수준. 차원 최소로 UQ 논증 깔끔.
+- 채널 = v_y, gamma 독립 GP 2개. e_psi, e_y 는 학습 안 함(기구학, 진단만).
+- 프레임워크 = 직접 numpy/scipy exact GP (torch 미사용).
+- 커널 = ARD RBF. 하이퍼파라미터 = Type-II ML (log-det 포함 표준 NLML).
+- 결합 = 이산: x_{k+1} = rk4(f_nom) + B_d @ mu_GP(z), **RK4 밖** (Phase 1 확정).
+
+## src/gp/dataset.py
+잔차 데이터셋. 특징 z=[vy,gamma,delta], 타깃 [r_vy, r_gamma] (명목 대비 잔차).
+- 학습 궤적과 평가 궤적을 분리한다 (같은 주행 로그로 학습·평가 동시 금지).
+  제안: 학습=single_curve a_y=4, 평가=a_y=6 및 dlc (분포 밖 -> 사후분산 증가 시연).
+- 표준화 통계(z_mean/std, r_mean/std) 계산·저장, 추론 시 재사용.
+- 데이터셋에 생성 config/git hash/seed 동봉 (data/ 아래, git 제외).
+
+## src/gp/kernels.py
+ARD RBF. numpy 경로 + CasADi 경로. 같은 입력에 두 경로 일치 대조.
+
+## src/gp/train_offline.py
+- 딕셔너리 Z = 학습 궤적에서 선택한 M개 점 (config M, 기본 균일 subsample).
+  M 고정 (mpc-solver.md, Part 2 sparse 와 짝). 제대로 된 sparsification 은 Phase 9.
+- exact GP: K = RBF(Z,Z) + sigma_n^2 I, alpha = solve(K, y_std).
+- Type-II ML: NLML = 0.5 y^T alpha + 0.5 logdet(K) + 0.5 n log(2pi).
+  **log-det 생략 금지** (gp-residual.md). scipy.optimize 로 하이퍼파라미터 최적화.
+- 2채널 독립 학습. Z/alpha/lengthscale/sigma_f/sigma_n/표준화통계 저장.
+
+## src/gp/casadi_export.py
+mu(z) = k(z_std, Z) @ alpha (표준화 공간 계산 후 역표준화해 r 반환).
+Z/alpha/하이퍼파라미터/표준화통계를 CasADi 파라미터로 주입.
+**numpy GP 예측과 CasADi 예측이 일치하는지 대조 (필수).**
+
+## src/control/mpc_gp.py
+GPStepModel: extra_param_dim = 평탄화된 [Z, alpha, lengthscale, sigma_f, 표준화통계].
+  step_sym = rk4_step(f_nom) + B_d @ mu_GP(z_k), z_k=[x[0],x[1],u]. **RK4 밖**.
+  (KF 의 연속 외란(RK4 안)과 대비 — GP 잔차는 이산 상태차이 단위.)
+  mu_GP 는 각 지평 스텝의 **예측 상태** z_k 에서 평가된다 -> GP 는 외란을 지평에서
+  d(x) 로 예측한다. 이것이 KF 의 상수 d_hat(오라클 상한 +7.3%)을 넘는 근거다.
+  extra_param_values() = 학습된 값 (offline 이므로 고정). MpcBase/mpc_nominal 무수정.
+
+## 사후분산 (제어에 넣지 않되 반드시 저장)
+mean-only 제어. 분산을 제약·비용에 전파하지 마라. 그러나 매 스텝
+var(z) = k(z,z) - k(z,Z) K^-1 k(Z,z) 를 계산·로깅한다 (논문 주 증거물). 끄지 마라.
+
+## configs/gp/default.yaml, configs/experiment/part1_gp.yaml
+part1_gp 는 part1_mpc_only/part1_kf 와 통제변수(경로·IC·seed·N·가중치·IPOPT·
+플랜트·a_y) 동일. 조립된 config diff 로 확인.
+
+## tests/test_gp.py — 게이트 7
+- 잔차 0 데이터로 학습 -> GP 평균 ~0, 분산 ~사전분산 수준.
+- 학습 데이터에서 멀어질수록 사후 std 가 단조 증가 (핵심 UQ 주장. 실패하면 멈춤).
+- numpy GP 예측과 CasADi 변환본 예측 일치.
+- 표준화 통계 저장·재적용 시 예측 동일.
+- 추가 게이트: MPC+GP 추종 < MPC+KF (GP 가 KF 를 이긴다. Phase 6 방식 재사용).
+
+학습 데이터 수집·궤적 분리·M 선택에 애매하면 코드 전에 질문해라.
+```
+
+**게이트**: testing.md 게이트 7 전부 + 사후 std 단조 증가 + numpy↔CasADi 일치 +
+**MPC+GP < MPC+KF < MPC-only** (추종오차).
+
+---
+
+### Phase 8~10 로드맵 (프롬프트는 해당 Phase 착수 시)
 
 - **Phase 6** — 위 「Phase 6 — 증강 KF 비교군」 프롬프트로 확정.
-- **Phase 7** — offline GP. 학습 → CasADi 변환 → `mpc_gp` 결합.
-  게이트: GPyTorch 예측과 CasADi 변환본 일치, 학습 데이터 밖에서 사후 std 증가.
-  착수 시 결정: GP 입력 축(`v_x` 포함 여부), `M`, 프레임워크, 학습 시나리오.
+- **Phase 7** — 위 「Phase 7 — offline GP」 프롬프트로 확정.
 - **Phase 8** — **Part 1 실험 실행**. MPC only / MPC+증강KF / MPC+GP.
   주 산출물은 추종오차가 아니라 **GP 사후 std vs KF `P` d-블록 대각의 공간 지도**와
   예측구간 커버리지다.
