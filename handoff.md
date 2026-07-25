@@ -6,23 +6,36 @@
 
 ## 오늘 한 일 (3줄)
 
-- 2026-07-25 — **Phase 0 완료.** config 로딩 체계(`src/config.py`: VehicleConfig,
-  SimConfig, ExperimentConfig + 조합 로더 + 재현성 스냅샷)와 선형 자전거 모델
-  (`src/models/linear_bicycle.py`: numpy/CasADi 이중 경로 + 해석 검증 함수) 구현.
-- `configs/vehicle/{sedan,limo}.yaml`, `configs/sim/default.yaml`,
-  `configs/experiment/baseline_matched.yaml` 작성. casadi/scipy/pytest/pyyaml 설치.
-- `tests/test_model.py` 게이트 2b·3·4 **10개 전부 통과**.
+- 2026-07-25 — **Phase 0 + Phase 1 완료.** config 체계 + 선형 자전거 모델(Phase 0),
+  적분기(`integrators.py`: RK4 + DOP853 plant_step) + 개루프 검증(Phase 1) 구현.
+- 게이트 **1(정상상태 요레이트 1% 이내), 2(언더/오버/뉴트럴), 2b, 3, 5 전부 통과.**
+  전체 테스트 13개 pass. `run_openloop.py`로 sedan/limo 스텝 응답 + 재현성 메타 생성.
+- casadi/scipy/pytest/pyyaml/matplotlib 설치됨.
+
+## 측정값 (기준선 — 이후 잔차 해석에 사용)
+
+**noise floor** (모델 완전일치, RK4(dt=0.02) vs DOP853, 1-step, sedan vx=15):
+
+| 채널 | RMS | max |
+|---|---|---|
+| v_y [m/s]    | 9.57e-9  | 1.28e-8 |
+| gamma [rad/s]| 9.09e-10 | 1.22e-9 |
+| e_psi [rad]  | 1.84e-10 | 2.47e-10 |
+| e_y [m]      | 5.67e-10 | 7.90e-10 |
+
+- 진단 임계값 = 위 채널별 값의 10배 (gp-residual.md). Phase 4에서 잔차와 대조.
+- 시상수: sedan tau≈0.126s (고유값 -7.93±3.04i, 감쇠진동),
+  limo tau≈0.010s (고유값 -119,-100, 과감쇠). limo Iz는 미식별 근사값.
+- `gamma_ss(sedan,15,0.02)=0.094675 rad/s` — 적분 대조 통과.
 
 ## 다음에 먼저 할 일
 
-1. `prompts.md`의 **Phase 1 프롬프트** 입력 (적분기 + 개루프 물리 검증).
-   작업 전 `.claude/rules/vehicle-model.md`, `testing.md` 를 먼저 Read.
-2. `src/models/integrators.py` (RK4 + 고정밀), `tests/test_integrator.py`
-   게이트 1·2·5 구현.
-3. **게이트 1(정상상태 요레이트 1% 이내)** 통과가 최우선. 실패 시 MPC로 넘어가지 않는다.
-   기준값(적분 대조용): `gamma_ss(sedan, vx=15, delta=0.02) = 0.094675 rad/s`
-   (해석해. Phase 1에서 시간적분 결과와 대조).
-4. 게이트 5 noise floor는 **채널별로** 숫자 출력하고 이 파일에 기록.
+1. `prompts.md`의 **Phase 2 프롬프트** 입력 (참조 경로 = 곡률 프로파일 kappa(s)).
+   작업 전 `.claude/rules/sim-experiment.md` "경로 표현" 절을 먼저 Read.
+2. `configs/path/{single_curve,dlc}.yaml`, `src/path/reference.py`,
+   `tests/test_reference.py` 게이트 8.
+3. `single_curve.yaml` 기본값(구간 길이·곡률반경·a_y_max·kappa_eps)은
+   **제안 후 사용자 확인**받고 확정 (프롬프트에 명시됨).
 
 ## 절대 하지 말 것
 
