@@ -1,0 +1,14 @@
+# 의존성 추가 전에 반드시 사용자에게 물어라 (.claude/rules/python-conventions.md)
+# TODO: 버전 미고정. Phase 1 환경 구성 후 실제 설치 버전으로 핀 고정하고,
+#       results/<run_id>/에 pip freeze 스냅샷을 남길 것.
+
+numpy
+scipy
+casadi
+pyyaml
+matplotlib
+pytest
+
+# GP 학습 (오프라인 전용 — 제어 루프에서 호출 금지)
+torch
+gpytorch

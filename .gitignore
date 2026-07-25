@@ -1,0 +1,20 @@
+# 실험 산출물 — 커밋 금지 (CLAUDE.md 「금지」 참조)
+results/
+data/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# 개인 설정
+CLAUDE.local.md
+.claude/settings.local.json
+
+# OS
+Thumbs.db
+.DS_Store
