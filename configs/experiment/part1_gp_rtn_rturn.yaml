@@ -1,0 +1,11 @@
+# Part 1 / 레이싱 트랙 + **현실적 센서 잡음** / 케이스 = gp / 시나리오 rtn_rturn
+# (형상외삽 + 잡음). rt_rturn 과 동일하고 sensor 그룹만 추가된다. GP 는 재학습하지
+# 않는다(racetrack a_y=4 학습본 그대로) — 잡음 하에서도 형상외삽 우위가 유지되는지가
+# 이 시나리오의 목적이다.
+vehicle: sedan
+sim: racetrack
+path: right_turn
+mpc: default
+gp: racetrack
+plant: nonlinear
+sensor: realistic

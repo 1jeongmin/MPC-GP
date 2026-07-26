@@ -43,7 +43,8 @@ SCENARIOS_SYNTHETIC = ("ay4", "ay6", "dlc")
 # a_y_max 는 rt_ay4 와 동일(4.0)하게 통제, 경로 형상만 다르다(dlc 와 같은 원칙).
 SCENARIOS_RACETRACK = ("rt_ay4", "rt_ay6", "rt_rturn")
 # rtn_* = 레이싱 트랙 + 현실적 센서 잡음 (Phase 8c). rt_* 와 sensor 그룹만 다르다.
-SCENARIOS_NOISY = ("rtn_ay4", "rtn_ay6")
+# rtn_rturn = 형상외삽(rt_rturn) + 잡음 — rt_rturn 의 이례적 우위가 잡음에도 버티는지 확인.
+SCENARIOS_NOISY = ("rtn_ay4", "rtn_ay6", "rtn_rturn")
 SCENARIOS = SCENARIOS_SYNTHETIC + SCENARIOS_RACETRACK + SCENARIOS_NOISY
 
 # 케이스 간 **반드시 동일**해야 하는 스냅샷 키 (sim-experiment.md 「통제해야 할 변수」).

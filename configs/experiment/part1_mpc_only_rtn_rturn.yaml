@@ -1,0 +1,9 @@
+# Part 1 / 레이싱 트랙 + **현실적 센서 잡음** / 케이스 = mpc_only / 시나리오 rtn_rturn
+# (형상외삽 + 잡음). rt_rturn 과 동일하고 sensor 그룹만 추가된다.
+# 세 케이스 모두 **같은 잡음 실현**의 측정값을 제어 피드백으로 받는다 (통제변수).
+vehicle: sedan
+sim: racetrack
+path: right_turn
+mpc: default
+plant: nonlinear
+sensor: realistic

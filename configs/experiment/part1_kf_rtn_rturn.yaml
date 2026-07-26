@@ -1,0 +1,10 @@
+# Part 1 / 레이싱 트랙 + **현실적 센서 잡음** / 케이스 = kf / 시나리오 rtn_rturn
+# (형상외삽 + 잡음). rt_rturn 과 동일하고 sensor 그룹만 추가된다
+# (KF 는 R_kf 를 센서 사양에 맞춘 realistic_sensor 버전 사용).
+vehicle: sedan
+sim: racetrack
+path: right_turn
+mpc: default
+ekf: realistic_sensor
+plant: nonlinear
+sensor: realistic
