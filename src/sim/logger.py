@@ -4,8 +4,12 @@
     t, x(4), delta, vx, kappa, s
     solve_time, ipopt_iter, converged
     residual r(4)                      # 4채널 전부. 3,4번(e_psi,e_y)은 진단용
-    gp_mean(2), gp_var(2)              # GP 케이스 (Phase 7~)
-    ekf_P_diag(4), ekf_innovation      # EKF 케이스 (Phase 6~)
+    gp_mean(2), gp_var(2)              # GP 케이스 — MpcBase.step_log 훅 (Phase 8~)
+    ekf_x_hat(6), ekf_d_hat(2),        # EKF 케이스 (Phase 6~)
+    ekf_P_diag(6), ekf_P_d_block(2,2), ekf_innovation(4)
+
+케이스별 필드는 runner 가 **분기 없이** 붙인다: estimator 가 있으면 ekf_*,
+컨트롤러가 step_log() 를 내놓으면 그 dict 를 그대로 합류시킨다.
 
 results/ 에는 npz 로 저장한다. 재현성 메타(config 스냅샷, git hash, seed,
 라이브러리 버전)가 없으면 결과를 만들지 마라.

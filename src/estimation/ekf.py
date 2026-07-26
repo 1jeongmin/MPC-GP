@@ -102,6 +102,16 @@ class AugmentedKF:
         """공분산 대각 (6,). d-블록(4:6)이 모델오차 불확실성."""
         return np.diag(self.P).copy()
 
+    @property
+    def P_d_block(self) -> np.ndarray:
+        """외란 공분산 부분행렬 P[4:6, 4:6] (2,2).
+
+        대각만이 아니라 **전체 블록**이 필요하다: Phase 8 캘리브레이션에서 이 블록을
+        이산 잔차 공간으로 G P_d G^T 로 환산하는데(d 는 연속 rate, 잔차는 이산 상태차이),
+        G 가 비대각이면 대각만으로는 환산이 틀린다.
+        """
+        return self.P[4:6, 4:6].copy()
+
     def predict(self, u: float, vx: float, kappa: float) -> None:
         """예측 스텝: x <- F(x,u), P <- F P F^T + Q*dt."""
         F = np.array(self._F_jac(self.x_hat, u, vx, kappa))

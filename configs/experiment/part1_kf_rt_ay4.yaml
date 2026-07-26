@@ -1,0 +1,8 @@
+# Part 1 / 레이싱 트랙 / 케이스 = MPC + 증강 KF / 시나리오 rt_ay4 (in-distribution).
+# part1_mpc_only_rt_ay4 와 통제변수 동일 + ekf 그룹만 추가.
+vehicle: sedan
+sim: racetrack
+path: racetrack
+mpc: default
+ekf: default
+plant: nonlinear

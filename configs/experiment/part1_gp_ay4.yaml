@@ -1,0 +1,9 @@
+# Part 1 / 케이스 = MPC + offline GP / 시나리오 (a) in-distribution.
+# part1_mpc_only_ay4 와 통제변수 동일 + gp 그룹만 추가.
+# 이 시나리오는 GP 학습 분포와 같다 (gp_train.yaml 과 경로·a_y 동일).
+vehicle: sedan
+sim: default
+path: single_curve
+mpc: default
+gp: default
+plant: nonlinear

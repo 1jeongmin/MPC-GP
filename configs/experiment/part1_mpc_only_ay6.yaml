@@ -1,0 +1,11 @@
+# Part 1 / 케이스 = MPC only / 시나리오 (b) 강도 외삽 (a_y=6).
+# 경로 형상은 (a)와 같고 a_y_max 만 4->6. GP 학습 분포 **밖**이다:
+# Phase 5 특성화에서 a_y=6 은 SNR ×3.86M, max|alpha_f|=6.85deg 로 (a)의 3.68deg 보다
+# 타이어 비선형 영역 깊숙이 들어간다. GP 사후분산이 커져야 하는 구간이다.
+vehicle: sedan
+sim: default
+path: single_curve
+mpc: default
+plant: nonlinear
+overrides:
+  path.a_y_max: 6.0

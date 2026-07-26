@@ -1,0 +1,8 @@
+# Part 1 / 케이스 = MPC only (보정 없음) / 시나리오 (a) in-distribution.
+# 통제변수(vehicle·sim·path·mpc·plant·a_y)는 같은 시나리오의 세 케이스에서 동일해야
+# 한다. run_part1.py 가 조립된 config 를 diff 해서 자동 검증하고, 다르면 실행을 거부한다.
+vehicle: sedan
+sim: default
+path: single_curve
+mpc: default
+plant: nonlinear

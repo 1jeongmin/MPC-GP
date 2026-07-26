@@ -45,11 +45,19 @@ class GPStepModel:
         self._mu_func = build_mu_function(M)          # CasADi GP 평균 표현
         self._p = gp_param_vector(gp)                 # 주입 파라미터 (고정)
         self._mu = np.zeros(2)
+        self._var = np.zeros(2)
 
     def set_operating_point(self, x0: np.ndarray, u_prev: float) -> None:
-        """현재 작동점 z=[v_y, gamma, delta_prev] 에서 GP 평균(CasADi)을 평가·저장."""
+        """현재 작동점 z=[v_y, gamma, delta_prev] 에서 GP 평균·사후분산을 평가·저장.
+
+        평균은 CasADi 표현으로(= NLP 에 주입되는 값과 정확히 동일한 경로),
+        사후분산은 numpy GP 로 계산한다. 분산은 **제어에 쓰지 않지만**(mean-only,
+        non-cautious) 매 스텝 반드시 로깅한다 — gp-residual.md 「사후분산은 제어에
+        넣지 않되, 반드시 저장한다」. 이것이 Part 1 의 주 증거물이다.
+        """
         z = np.array([x0[0], x0[1], u_prev])
         self._mu = np.array(self._mu_func(z, self._p)).reshape(2)
+        self._var = np.asarray(self.gp.predict_var(z), float).reshape(2)
 
     def step_sym(self, x, u, vx, kappa, p_extra):
         correction = ca.vertcat(p_extra[0], p_extra[1], 0.0, 0.0)   # B_d @ mu_hat
@@ -57,6 +65,14 @@ class GPStepModel:
 
     def extra_param_values(self) -> np.ndarray:
         return self._mu
+
+    def step_log(self) -> dict[str, np.ndarray]:
+        """MpcBase.step_log 훅 — 이번 스텝의 GP 평균·사후분산을 로그에 싣는다.
+
+        단위: gp_mean/gp_var 는 **이산 잔차 공간**(v_y [m/s], gamma [rad/s]) 이다.
+        표준화 공간이 아니다 (casadi_export 가 역표준화해 반환).
+        """
+        return {"gp_mean": self._mu.copy(), "gp_var": self._var.copy()}
 
 
 def make_gp_mpc(vehicle: VehicleConfig, cfg_mpc: MpcConfig, dt_ctrl: float,

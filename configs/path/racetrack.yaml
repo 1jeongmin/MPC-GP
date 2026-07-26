@@ -1,0 +1,30 @@
+# 레이싱 트랙 — 외부 제공 kappa(s) 테이블 (합성 경로가 아니다).
+#
+# 출처: 자율주행이론 실습 2차 배포본 `path_data_racetrack.mat`.
+#   map = [s; x; y; theta; kappa]  (5 x 1912), ds = 0.5 m 균일, 총 955.5 m 폐곡선.
+#
+# 이 경로를 쓰는 이유: single_curve/dlc 는 우리가 만든 합성 경로라 "GP 가 학습한
+# 것과 같은 생성기"에서 나온다. 외부 트랙은 그 생성기 밖이라 잔차 구조가 우리
+# 설계에 유리하게 치우쳤을 가능성을 배제할 수 있다.
+#
+# 데이터 검증 (2026-07-26, 로드 시점에 확인함):
+#   - |dtheta/ds - kappa| max 7.5e-4  -> 곡률이 자기정합적 (수치미분 잡음 아님)
+#   - dkappa/ds max 0.003 1/m^2       -> 계단형 없음 (sim-experiment.md 경로 표현 준수)
+#   - kappa in [-0.0250, +0.0309], R_min = 32.4 m
+#   - a_y=4.0 -> vx_min 11.4 m/s,  a_y=6.0 -> vx_min 13.9 m/s (sedan vx_range [5,25] 안)
+#
+# segments 는 쓰지 않는다 (1911개를 옮겨 적는 것은 의미가 없다). table 로 읽는다.
+# 두 방식은 Reference 안에서 같은 (s_nodes, k_nodes) 보간으로 귀결된다.
+
+a_y_max: 4.0             # m/s^2. experiment 의 overrides 로 6.0 등으로 바꾼다.
+kappa_eps: 1.0e-4        # 1/m, 직선 취급 임계 (vx_max 0-division 방어)
+kappa_max: 0.0309        # 1/m, 참고용 (R_min = 32.4 m). 빌더는 쓰지 않는다.
+
+table:
+  file: data/path/path_data_racetrack.mat   # 저장소 루트 기준. data/ 는 git 제외.
+  kind: mat
+  var: map
+  s_row: 0               # map 행 0 = 호길이 s [m]
+  kappa_row: 4           # map 행 4 = 곡률 kappa [1/m]
+  # 재현성: 로드할 때마다 대조한다. 데이터가 바뀌면 즉시 멈춘다.
+  sha256: 51987ffe8ae7259b2f2ba0445c99547d8d301ace62c2495c3e09272f9c62ef9a

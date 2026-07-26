@@ -1,0 +1,9 @@
+# Part 1 / 케이스 = MPC + offline GP / 시나리오 (c) 형상 외삽 (double lane change).
+# GP 는 single_curve(단방향 커브)로 학습됐다. dlc 의 반대부호 구간은 학습 데이터가
+# 덮지 않은 영역이므로 사후분산이 커져야 한다 — UQ 논증의 형상축 시연.
+vehicle: sedan
+sim: default
+path: dlc
+mpc: default
+gp: default
+plant: nonlinear

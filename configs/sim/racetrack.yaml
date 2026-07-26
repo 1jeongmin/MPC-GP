@@ -1,0 +1,11 @@
+# 레이싱 트랙용 시뮬레이션 설정.
+# default.yaml 과 다른 것은 duration 뿐이다 — 트랙이 955.5 m 라 한 바퀴에
+# a_y=4 에서 ~56 s, a_y=6 에서 ~48 s 걸린다. default 의 20 s 로는 트랙의 1/3도 못 돈다.
+# runner 는 경로 끝 + stop_margin 에서 조기 종료하므로 여유롭게 잡아도 낭비가 아니다.
+#
+# 나머지(dt_plant, dt_ctrl, seed)는 default 와 **동일**하게 유지한다 — 시나리오 간
+# 비교가 되려면 다중레이트 구조와 seed 가 같아야 한다.
+dt_plant: 0.01   # s,  플랜트 적분 스텝 (100 Hz)
+dt_ctrl: 0.02    # s,  제어 스텝 (50 Hz). dt_ctrl / dt_plant = 2
+duration: 70.0   # s,  한 바퀴(최대 56 s) + 여유
+seed: 0          # 난수 seed (default 와 동일 — 케이스 간 통제)

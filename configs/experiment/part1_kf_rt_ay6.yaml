@@ -1,0 +1,9 @@
+# Part 1 / 레이싱 트랙 / 케이스 = MPC + 증강 KF / 시나리오 rt_ay6 (강도 외삽).
+vehicle: sedan
+sim: racetrack
+path: racetrack
+mpc: default
+ekf: default
+plant: nonlinear
+overrides:
+  path.a_y_max: 6.0

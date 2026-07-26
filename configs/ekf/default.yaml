@@ -19,6 +19,10 @@ R_kf_diag: [1.0e-4, 1.0e-6, 1.0e-6, 1.0e-4]                # TODO Phase 8 공정
 # 초기 추정 공분산 대각(6). d-블록은 작게(초기 전이 스파이크 완화).
 P0_diag: [0.5, 0.05, 0.01, 0.01, 0.5, 0.1]
 
-tuning_method: manual   # 수동 그리드 (공정성: 방식 명시). Phase 8 에서 튜닝예산 기록.
-# 주의: 현재 값은 MPC+KF 가 MPC-only 를 이기는 정상 기본값이나, GP 와의 공정 비교용
-# 최종 튜닝은 Phase 8 에서 GP 하이퍼파라미터 탐색과 같은 예산으로 수행·기록한다.
+# 튜닝 예산 기록 (공정성 — ekf-baseline.md 「튜닝 예산을 기록한다」).
+# GP 와 **같은 형식·같은 횟수**로 남긴다. configs/gp/default.yaml 의 대응 항목 참조.
+# Phase 8 결정: 두 방법의 자유 손잡이에 in-distribution 폐루프 평가를 같은 횟수 배정하고,
+# (b) a_y=6 / (c) dlc 결과를 본 뒤에는 어느 쪽도 손대지 않는다.
+tuning_method: closed_loop_grid
+tuning_budget_closed_loop_evals: 20   # 자유 손잡이(Q_d 스케일, R_kf 스케일) 탐색
+tuning_selection_scenario: part1_kf_ay4   # in-distribution 만 보고 결정. (b)(c) 열람 금지

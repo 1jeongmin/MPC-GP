@@ -10,3 +10,13 @@ init_sigma_f: 1.0        # 표준화 타깃 기준 초기 신호 표준편차
 init_sigma_n: 0.1        # 표준화 타깃 기준 초기 잡음 표준편차
 sigma_n_floor: 1.0e-2    # 잡음 하한 (정칙화 — sigma_n->0 보간 과적합 방지, Phase 7 진단)
 jitter: 1.0e-8           # K 대각 안정화
+
+# GP 학습 데이터를 수집할 experiment. 학습 출처를 config 한 곳에 고정해 평가 궤적과
+# 분리한다 (gp-residual.md 데이터 위생). 평가 결과가 나쁘다고 이 값을 바꾸지 마라.
+train_experiment: gp_train
+
+# 튜닝 예산 기록 (공정성 — ekf-baseline.md 「튜닝 예산을 기록한다」).
+# KF 와 **같은 형식·같은 횟수**로 남긴다. configs/ekf/default.yaml 의 대응 항목 참조.
+tuning_method: type2_ml + closed_loop_grid
+tuning_budget_closed_loop_evals: 20   # 자유 손잡이(M, sigma_n_floor) 탐색에 쓴 폐루프 평가
+tuning_selection_scenario: part1_gp_ay4   # in-distribution 만 보고 결정. (b)(c) 열람 금지

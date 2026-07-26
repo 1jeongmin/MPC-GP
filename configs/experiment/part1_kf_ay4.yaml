@@ -1,0 +1,8 @@
+# Part 1 / 케이스 = MPC + 증강 KF / 시나리오 (a) in-distribution.
+# part1_mpc_only_ay4 와 통제변수 동일 + ekf 그룹만 추가 (그 추가가 곧 케이스 정의다).
+vehicle: sedan
+sim: default
+path: single_curve
+mpc: default
+ekf: default
+plant: nonlinear

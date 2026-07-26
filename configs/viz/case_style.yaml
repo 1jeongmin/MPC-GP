@@ -1,0 +1,30 @@
+# 케이스 비교 그림의 색·선종 고정 매핑 (.claude/rules/sim-experiment.md 플롯 규약:
+# "케이스 비교 그림은 색·선종을 케이스별로 고정한다(config에 매핑 저장)").
+#
+# 그림마다 색이 바뀌면 논문 그림들 사이에서 케이스를 눈으로 못 쫓는다.
+# 여기를 바꾸면 모든 비교 그림이 함께 바뀐다.
+cases:
+  mpc_only:
+    color: "#7f7f7f"      # 회색 — 보정 없음(기준선)
+    linestyle: "--"
+    label: "MPC only"
+  kf:
+    color: "#1f77b4"      # 파랑 — 시간축 필터
+    linestyle: "-."
+    label: "MPC + KF"
+  gp:
+    color: "#d62728"      # 빨강 — 상태공간 학습
+    linestyle: "-"
+    label: "MPC + GP"
+
+# 시나리오별 마커 (불확실성 지도의 궤적 오버레이용).
+scenarios:
+  ay4:
+    marker: "o"
+    label: "(a) in-dist  a_y=4"
+  ay6:
+    marker: "^"
+    label: "(b) 강도외삽 a_y=6"
+  dlc:
+    marker: "s"
+    label: "(c) 형상외삽 dlc"

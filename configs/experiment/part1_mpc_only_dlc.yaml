@@ -1,0 +1,9 @@
+# Part 1 / 케이스 = MPC only / 시나리오 (c) 형상 외삽 (double lane change).
+# a_y_max 는 (a)와 같은 4.0 으로 두어 **형상만** 바뀌게 통제한다 (dlc.yaml 기본값 4.0).
+# single_curve 는 한 방향 커브라 잔차가 한쪽 부호에 몰리는 반면, dlc 는 좌우 교대라
+# GP 학습 데이터가 덮지 않은 반대부호 영역으로 들어간다.
+vehicle: sedan
+sim: default
+path: dlc
+mpc: default
+plant: nonlinear

@@ -1,0 +1,7 @@
+# Part 1 / 케이스 = MPC + 증강 KF / 시나리오 (c) 형상 외삽 (double lane change).
+vehicle: sedan
+sim: default
+path: dlc
+mpc: default
+ekf: default
+plant: nonlinear

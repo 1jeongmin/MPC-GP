@@ -1,0 +1,8 @@
+# Part 1 / 레이싱 트랙 / 케이스 = MPC + offline GP / 시나리오 rt_ay4 (in-distribution).
+# GP 는 gp_train_racetrack (같은 트랙, a_y=4) 으로 학습된다 -> 학습 분포 안.
+vehicle: sedan
+sim: racetrack
+path: racetrack
+mpc: default
+gp: racetrack
+plant: nonlinear

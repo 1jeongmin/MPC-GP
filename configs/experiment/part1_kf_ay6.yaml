@@ -1,0 +1,9 @@
+# Part 1 / 케이스 = MPC + 증강 KF / 시나리오 (b) 강도 외삽 (a_y=6).
+vehicle: sedan
+sim: default
+path: single_curve
+mpc: default
+ekf: default
+plant: nonlinear
+overrides:
+  path.a_y_max: 6.0

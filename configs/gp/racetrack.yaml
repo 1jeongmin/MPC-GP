@@ -1,0 +1,19 @@
+# 레이싱 트랙용 offline GP 설정.
+# 하이퍼파라미터·M·정칙화는 configs/gp/default.yaml 과 **동일**하게 둔다 —
+# 경로가 바뀌었다고 GP 설정까지 바꾸면 Phase 8(합성경로) 결과와 비교가 안 된다.
+# 유일한 차이는 학습 출처(train_experiment)가 레이싱 트랙이라는 것뿐이다.
+
+M: 100                   # 딕셔너리 크기 (default 와 동일)
+init_lengthscale: 1.0
+init_sigma_f: 1.0
+init_sigma_n: 0.1
+sigma_n_floor: 1.0e-2    # 정칙화 (Phase 7 진단). 커버리지 맞추려고 만지지 마라.
+jitter: 1.0e-8
+
+# 학습 출처만 트랙으로 교체. in-distribution = racetrack a_y=4.
+train_experiment: gp_train_racetrack
+
+# 튜닝 예산 (공정성 — ekf/racetrack.yaml 과 같은 형식·같은 횟수).
+tuning_method: type2_ml + closed_loop_grid
+tuning_budget_closed_loop_evals: 20
+tuning_selection_scenario: part1_gp_rt_ay4   # in-distribution 만 보고 결정

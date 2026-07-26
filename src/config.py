@@ -8,7 +8,7 @@
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, asdict, field
+from dataclasses import dataclass, asdict, field, fields, replace
 from pathlib import Path
 from typing import Any
 
@@ -167,32 +167,68 @@ class PathSegment:
 
 
 @dataclass(frozen=True)
+class TableSource:
+    """샘플된 kappa(s) 테이블의 출처 (측정·외부 제공 경로용).
+
+    합성 경로는 `segments` 로 정의하지만, 실측/외부 트랙은 s 와 kappa 가 이미 촘촘히
+    샘플되어 있다. 그것을 1900개짜리 segments 로 옮겨 적는 것은 의미가 없으므로
+    테이블을 그대로 읽는다. `Reference` 는 두 경우 모두 같은 (s_nodes, k_nodes) 선형
+    보간으로 귀결되므로 곡률 표현 자체는 달라지지 않는다.
+
+    file: 저장소 루트 기준 상대경로 (data/ 아래. git 제외이므로 sha256 을 함께 기록).
+    kind: 'mat' 만 지원. rows: 2D 배열에서 s / kappa 를 뽑을 행 인덱스.
+    """
+    file: str
+    kind: str = "mat"
+    var: str = "map"
+    s_row: int = 0
+    kappa_row: int = 4
+    sha256: str | None = None       # 재현성: 데이터가 바뀌면 결과도 바뀐다
+
+    def __post_init__(self) -> None:
+        if self.kind != "mat":
+            raise ValueError(f"지원하지 않는 테이블 종류: {self.kind!r} (현재 'mat' 만).")
+        if not self.file:
+            raise ValueError("TableSource.file 이 비어 있다.")
+
+
+@dataclass(frozen=True)
 class PathConfig:
     """호길이 곡률 프로파일 kappa(s) 정의.
 
     단위: a_y_max [m/s^2], kappa_eps [1/m], segments (length [m], kappa_end [1/m]).
     첫 세그먼트의 시작 곡률은 0으로 가정한다 (직선에서 출발).
     kappa_max 는 참고용 메타데이터로 빌더는 사용하지 않는다.
+
+    경로 정의는 **둘 중 정확히 하나**다:
+      - `segments`: 합성 경로 (조각선형 클로소이드). single_curve, dlc.
+      - `table`:    샘플된 kappa(s) 테이블 (외부 제공 트랙). racetrack.
+    둘 다 주거나 둘 다 빠지면 예외 — 어느 쪽이 경로를 정의했는지 모호해지면 안 된다.
     """
     a_y_max: float
     kappa_eps: float
-    segments: tuple[PathSegment, ...]
+    segments: tuple[PathSegment, ...] = ()
     kappa_max: float | None = None
+    table: TableSource | None = None
 
     def __post_init__(self) -> None:
         if not (self.a_y_max > 0.0):
             raise ValueError(f"a_y_max 는 양수여야 한다 (got {self.a_y_max}).")
         if not (self.kappa_eps > 0.0):
             raise ValueError(f"kappa_eps 는 양수여야 한다 (got {self.kappa_eps}).")
-        if len(self.segments) == 0:
-            raise ValueError("segments 가 비어 있다.")
+        has_seg, has_tab = len(self.segments) > 0, self.table is not None
+        if has_seg == has_tab:
+            raise ValueError(
+                "경로는 segments 또는 table 중 **정확히 하나**로 정의해야 한다 "
+                f"(segments={len(self.segments)}, table={'있음' if has_tab else '없음'})."
+            )
         for i, seg in enumerate(self.segments):
             if not (seg.length > 0.0):
                 raise ValueError(f"segments[{i}].length 는 양수여야 한다 (got {seg.length}).")
 
     @property
     def total_length(self) -> float:
-        """경로 총 호길이 [m]."""
+        """경로 총 호길이 [m]. 테이블 경로는 Reference 가 파일에서 읽으므로 여기선 0."""
         return float(sum(seg.length for seg in self.segments))
 
     @classmethod
@@ -203,7 +239,16 @@ class PathConfig:
                 kappa_end=float(s["kappa_end"]),
                 label=str(s.get("label", "")),
             )
-            for s in d["segments"]
+            for s in d.get("segments", ()) or ()
+        )
+        tab_d = d.get("table")
+        table = None if tab_d is None else TableSource(
+            file=str(tab_d["file"]),
+            kind=str(tab_d.get("kind", "mat")),
+            var=str(tab_d.get("var", "map")),
+            s_row=int(tab_d.get("s_row", 0)),
+            kappa_row=int(tab_d.get("kappa_row", 4)),
+            sha256=None if tab_d.get("sha256") is None else str(tab_d["sha256"]),
         )
         kmax = d.get("kappa_max")
         return cls(
@@ -211,6 +256,7 @@ class PathConfig:
             kappa_eps=float(d["kappa_eps"]),
             segments=segs,
             kappa_max=None if kmax is None else float(kmax),
+            table=table,
         )
 
 
@@ -293,6 +339,10 @@ class EkfConfig:
     R_kf_diag: tuple[float, ...]
     P0_diag: tuple[float, ...]
     tuning_method: str = "manual"   # 공정성: 튜닝 방식 명시 (ekf-baseline.md)
+    # 공정성: GP 와 **같은 형식**으로 남기는 튜닝 예산. 스냅샷에 실려야 리포트에서
+    # 비교 가능하다 (필드로 두지 않으면 from_dict 가 버려서 기록이 사라진다).
+    tuning_budget_closed_loop_evals: int = 0
+    tuning_selection_scenario: str = ""
 
     def __post_init__(self) -> None:
         if len(self.Q_kf_diag) != 6:
@@ -312,6 +362,8 @@ class EkfConfig:
             R_kf_diag=tuple(float(v) for v in d["R_kf_diag"]),
             P0_diag=tuple(float(v) for v in d["P0_diag"]),
             tuning_method=str(d.get("tuning_method", "manual")),
+            tuning_budget_closed_loop_evals=int(d.get("tuning_budget_closed_loop_evals", 0)),
+            tuning_selection_scenario=str(d.get("tuning_selection_scenario", "")),
         )
 
 
@@ -328,6 +380,15 @@ class GpConfig:
     init_sigma_n: float = 0.1
     sigma_n_floor: float = 1.0e-2   # 표준화 단위 잡음 하한 (정칙화 — 보간 과적합 방지)
     jitter: float = 1.0e-8
+    # GP 학습 데이터를 수집할 experiment 이름. 학습 궤적과 평가 궤적을 분리하기 위해
+    # **config 로 고정**한다 (gp-residual.md 데이터 위생). 평가 시나리오가 바뀌어도
+    # 학습 출처는 이 값 하나로 고정되므로, 평가가 나쁘다고 학습 데이터를 슬쩍 바꾸는
+    # 일이 구조적으로 막힌다. 이 experiment 는 gp 그룹을 참조하면 안 된다(순환).
+    train_experiment: str = "gp_train"
+    # 공정성: KF 와 같은 형식의 튜닝 예산 기록 (EkfConfig 의 대응 필드와 짝).
+    tuning_method: str = "type2_ml"
+    tuning_budget_closed_loop_evals: int = 0
+    tuning_selection_scenario: str = ""
 
     def __post_init__(self) -> None:
         if not (isinstance(self.M, int) and self.M > 0):
@@ -336,6 +397,8 @@ class GpConfig:
                      "sigma_n_floor", "jitter"):
             if not (getattr(self, name) > 0.0):
                 raise ValueError(f"GpConfig.{name} 는 양수여야 한다.")
+        if not self.train_experiment:
+            raise ValueError("GpConfig.train_experiment 가 비어 있다.")
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "GpConfig":
@@ -346,6 +409,10 @@ class GpConfig:
             init_sigma_n=float(d.get("init_sigma_n", 0.1)),
             sigma_n_floor=float(d.get("sigma_n_floor", 1.0e-2)),
             jitter=float(d.get("jitter", 1.0e-8)),
+            train_experiment=str(d.get("train_experiment", "gp_train")),
+            tuning_method=str(d.get("tuning_method", "type2_ml")),
+            tuning_budget_closed_loop_evals=int(d.get("tuning_budget_closed_loop_evals", 0)),
+            tuning_selection_scenario=str(d.get("tuning_selection_scenario", "")),
         )
 
 
@@ -353,6 +420,14 @@ def _dataclass_to_plain(obj: Any) -> dict[str, Any]:
     """dataclass -> 순수 dict (tuple 등을 YAML/JSON 친화 형태로)."""
     d = asdict(obj)
     return {k: (list(v) if isinstance(v, tuple) else v) for k, v in d.items()}
+
+
+# 조합 파일에서 그룹 참조가 아닌 예약 키.
+#   plant     : 플랜트 모델 종류. Phase 8 이전엔 스크립트가 주입했으나, 케이스 정의는
+#               config 로만 한다는 규칙(sim-experiment.md)에 따라 config 로 올렸다.
+#   overrides : 시나리오 정의값. "group.field: value" 점표기.
+_PLANT_KINDS = ("linear", "nonlinear")
+_RESERVED_KEYS = ("plant", "overrides")
 
 
 @dataclass(frozen=True)
@@ -368,15 +443,24 @@ class ExperimentConfig:
     mpc: "MpcConfig | None" = None
     ekf: "EkfConfig | None" = None
     gp: "GpConfig | None" = None
+    plant: str = "linear"
     # 조합 파일이 참조한 그룹 이름 -> config 이름 (재현성 스냅샷에 남긴다).
     raw_refs: dict[str, str] = field(default_factory=dict)
+    # 적용된 시나리오 override ("group.field" -> 값). 스냅샷에 그대로 남긴다.
+    overrides: dict[str, Any] = field(default_factory=dict)
 
     def to_snapshot(self) -> dict[str, Any]:
         """재현성 스냅샷용 dict 덤프. 참조가 아니라 조립된 값 전체를 담는다
-        (.claude/rules/sim-experiment.md "재현성")."""
+        (.claude/rules/sim-experiment.md "재현성").
+
+        override 는 **적용된 뒤의 값**이 그룹 덤프에 반영되고, 무엇을 덮었는지는
+        `overrides` 키에 따로 남는다. 통제변수 diff 는 그룹 덤프끼리 비교하면 된다.
+        """
         snap = {
             "name": self.name,
             "refs": dict(self.raw_refs),
+            "plant": self.plant,
+            "overrides": dict(self.overrides),
             "vehicle": _dataclass_to_plain(self.vehicle),
             "sim": _dataclass_to_plain(self.sim),
         }
@@ -411,22 +495,75 @@ def load_group(group: str, name: str, configs_dir: Path = CONFIGS_DIR) -> Any:
     return _GROUP_LOADERS[group](_load_yaml(path))
 
 
+def _apply_overrides(groups: dict[str, Any], overrides: dict[str, Any],
+                     exp_name: str) -> dict[str, Any]:
+    """`"group.field": value` 형태의 override 를 로드된 그룹 dataclass 에 적용한다.
+
+    frozen dataclass 이므로 `replace` 로 새 인스턴스를 만든다. `replace` 는
+    `__init__` 을 다시 타므로 각 그룹의 `__post_init__` 유효성 검사가 그대로 걸린다
+    (예: `a_y_max > 0`). 검사를 우회하는 경로를 만들지 않는 것이 요점이다.
+    """
+    out = dict(groups)
+    for dotted, value in overrides.items():
+        if not isinstance(dotted, str) or dotted.count(".") != 1:
+            raise ValueError(
+                f"experiment '{exp_name}' 의 override 키는 'group.field' 형태여야 한다 "
+                f"(got {dotted!r})."
+            )
+        group, fname = dotted.split(".")
+        if group not in out or out[group] is None:
+            raise ValueError(
+                f"experiment '{exp_name}' 가 override 하려는 그룹 '{group}' 를 "
+                f"참조하지 않는다 ({dotted})."
+            )
+        cfg = out[group]
+        valid = {f.name for f in fields(cfg)}
+        if fname not in valid:
+            raise ValueError(
+                f"experiment '{exp_name}' override '{dotted}': '{group}' 에 그런 필드가 "
+                f"없다. 가능한 필드: {sorted(valid)}"
+            )
+        out[group] = replace(cfg, **{fname: value})
+    return out
+
+
 def load_experiment(name: str, configs_dir: Path = CONFIGS_DIR) -> ExperimentConfig:
     """configs/experiment/<name>.yaml 조합 파일을 로드한다.
 
-    조합 파일은 그룹 참조(`group: name`)만 담는다. 값을 직접 담고 있으면 잘못된 것이다.
+    조합 파일은 그룹 참조(`group: name`)를 담는다. 그룹 값을 직접 담으면 잘못된 것이다.
     현재 vehicle, sim 은 필수. 나머지 그룹은 Phase 진행에 따라 추가된다.
+
+    예약 키 두 개는 그룹 참조가 아니다 (Phase 8):
+      plant: linear | nonlinear      # 플랜트 모델. 스크립트 주입 금지, config 로만.
+      overrides: {"path.a_y_max": 6.0}  # 시나리오 정의값
+
+    override 를 둔 이유: 분포이동 시나리오(a_y=4/6, dlc)를 표현하려면 path 그룹을
+    통째로 복제해야 하는데, 그러면 세그먼트 정의가 복붙되어 sim-experiment.md 의
+    "같은 값이 두 파일에 복붙되어 있으면 잘못된 것" 을 위반한다. 시나리오를 정의하는
+    **한 개 값**만 조합 파일에 두는 쪽이 복제보다 낫다는 판단이다 (Phase 8 결정).
     """
     exp_path = configs_dir / "experiment" / f"{name}.yaml"
     refs_raw = _load_yaml(exp_path)
 
-    # 조합 파일에는 문자열 참조만 허용한다 (값 복붙 방지).
+    plant = refs_raw.get("plant", "linear")
+    if plant not in _PLANT_KINDS:
+        raise ValueError(
+            f"experiment '{name}' 의 plant 는 {_PLANT_KINDS} 중 하나여야 한다 (got {plant!r})."
+        )
+
+    overrides = refs_raw.get("overrides", {}) or {}
+    if not isinstance(overrides, dict):
+        raise ValueError(f"experiment '{name}' 의 overrides 는 매핑이어야 한다 (got {overrides!r}).")
+
+    # 예약 키를 뺀 나머지는 전부 그룹 참조(문자열)여야 한다 (값 복붙 방지).
     refs: dict[str, str] = {}
     for group, ref in refs_raw.items():
+        if group in _RESERVED_KEYS:
+            continue
         if not isinstance(ref, str):
             raise ValueError(
                 f"experiment '{name}' 의 '{group}' 는 그룹 참조(문자열)여야 한다. "
-                f"값을 직접 적지 마라 (got {ref!r})."
+                f"값을 직접 적지 마라 (그룹 값을 바꾸려면 overrides 를 써라, got {ref!r})."
             )
         refs[group] = ref
 
@@ -434,13 +571,19 @@ def load_experiment(name: str, configs_dir: Path = CONFIGS_DIR) -> ExperimentCon
         if required not in refs:
             raise ValueError(f"experiment '{name}' 에 필수 그룹 '{required}' 참조가 없다.")
 
+    groups = {g: (load_group(g, refs[g], configs_dir) if g in refs else None)
+              for g in _GROUP_LOADERS}
+    groups = _apply_overrides(groups, overrides, name)
+
     return ExperimentConfig(
         name=name,
-        vehicle=load_group("vehicle", refs["vehicle"], configs_dir),
-        sim=load_group("sim", refs["sim"], configs_dir),
-        path=load_group("path", refs["path"], configs_dir) if "path" in refs else None,
-        mpc=load_group("mpc", refs["mpc"], configs_dir) if "mpc" in refs else None,
-        ekf=load_group("ekf", refs["ekf"], configs_dir) if "ekf" in refs else None,
-        gp=load_group("gp", refs["gp"], configs_dir) if "gp" in refs else None,
+        vehicle=groups["vehicle"],
+        sim=groups["sim"],
+        path=groups["path"],
+        mpc=groups["mpc"],
+        ekf=groups["ekf"],
+        gp=groups["gp"],
+        plant=plant,
         raw_refs=refs,
+        overrides=dict(overrides),
     )

@@ -172,6 +172,17 @@ class MpcBase:
         self._Xprev = None
         self._Uprev = None
 
+    def step_log(self) -> dict[str, np.ndarray] | None:
+        """이번 스텝에 모델이 남길 추가 로그. 없으면 None.
+
+        runner 가 케이스를 몰라도 되게 하는 훅이다 (estimator 훅과 대칭 구조).
+        StepModel 이 `step_log()` 를 구현하면 그 dict 가 그대로 로그 행에 합류한다.
+        GP 케이스는 여기로 gp_mean/gp_var 를 내보낸다 — 사후분산은 제어에 쓰지 않지만
+        **반드시 저장**해야 하는 논문의 주 증거물이다 (gp-residual.md).
+        """
+        fn = getattr(self.model, "step_log", None)
+        return fn() if fn is not None else None
+
     def solve(self, x0: np.ndarray, preview: Preview, u_prev: float) -> tuple[float, SolveInfo]:
         """1 스텝 MPC 를 풀어 (delta 명령, SolveInfo) 반환.
 

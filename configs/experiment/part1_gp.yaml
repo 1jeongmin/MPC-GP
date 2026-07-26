@@ -1,7 +1,0 @@
-# Part 1 케이스 3: MPC + offline GP (잔차 학습). 플랜트 비선형(스크립트 주입).
-# part1_mpc_only / part1_kf 와 통제변수(경로·IC·seed·N·가중치·IPOPT·플랜트·a_y) 동일.
-vehicle: sedan
-sim: default
-path: single_curve
-mpc: default
-gp: default

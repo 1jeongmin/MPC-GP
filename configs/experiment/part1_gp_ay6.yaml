@@ -1,0 +1,11 @@
+# Part 1 / 케이스 = MPC + offline GP / 시나리오 (b) 강도 외삽 (a_y=6).
+# GP 는 a_y=4 로 학습됐다(gp_train.yaml). 여기서 외삽이 일어나는 것이 **의도**다.
+# 사후분산이 커지고도 커버리지가 유지되면 UQ 주장 성립. 무너지면 그대로 보고한다.
+vehicle: sedan
+sim: default
+path: single_curve
+mpc: default
+gp: default
+plant: nonlinear
+overrides:
+  path.a_y_max: 6.0

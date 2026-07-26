@@ -1,7 +1,0 @@
-# Part 1 케이스 2: MPC + 증강 KF (외란 추정). 플랜트 비선형(스크립트 주입).
-# part1_mpc_only 와 vehicle/sim/path/mpc 동일 + ekf 추가.
-vehicle: sedan
-sim: default
-path: single_curve
-mpc: default
-ekf: default

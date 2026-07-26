@@ -1,0 +1,7 @@
+# Part 1 / 레이싱 트랙 / 케이스 = MPC only / 시나리오 rt_ay4 (in-distribution).
+# 경로만 외부 제공 트랙으로 바뀌었고, 케이스 구조·통제 규칙은 합성경로 실험과 동일하다.
+vehicle: sedan
+sim: racetrack
+path: racetrack
+mpc: default
+plant: nonlinear

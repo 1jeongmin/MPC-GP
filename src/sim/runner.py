@@ -94,9 +94,15 @@ def run_closed_loop(
             row.update(
                 ekf_x_hat=estimator.x_hat.copy(),
                 ekf_P_diag=estimator.P_diag,
+                ekf_P_d_block=estimator.P_d_block,
                 ekf_innovation=estimator.innovation.copy(),
                 ekf_d_hat=estimator.d_hat,
             )
+        # 컨트롤러 쪽 스텝 로그 훅 (GP 케이스의 gp_mean/gp_var 등). 케이스 분기 없음:
+        # runner 는 무엇이 실리는지 모르고, 있으면 그대로 합류시킨다.
+        extra = controller.step_log()
+        if extra:
+            row.update(extra)
         log.append(**row)
 
         x = x_plant_next

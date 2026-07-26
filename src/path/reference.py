@@ -12,15 +12,65 @@
 """
 from __future__ import annotations
 
+import hashlib
+from pathlib import Path
+
 import numpy as np
 
-from src.config import PathConfig
+from src.config import PathConfig, TableSource
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+def load_kappa_table(src: TableSource) -> tuple[np.ndarray, np.ndarray]:
+    """외부 제공 트랙의 (s, kappa) 테이블을 읽는다.
+
+    반환: (s_nodes [m], k_nodes [1/m]) — 둘 다 1D, s 는 단조증가하고 0 에서 시작한다.
+    이 두 배열이 그대로 `Reference` 의 보간 노드가 되므로, 합성 경로(segments)와
+    테이블 경로는 이 지점 이후 **완전히 같은 코드 경로**를 탄다.
+
+    재현성: config 에 sha256 이 적혀 있으면 파일 해시와 대조하고, 다르면 예외를
+    던진다. 경로 데이터가 조용히 바뀌면 이전 결과와 비교가 불가능해진다.
+    """
+    from scipy.io import loadmat
+
+    path = ROOT / src.file
+    if not path.exists():
+        raise FileNotFoundError(
+            f"경로 테이블 파일이 없다: {path}\n"
+            "data/ 는 git 제외이므로 원본에서 다시 복사해야 한다."
+        )
+    if src.sha256:
+        got = hashlib.sha256(path.read_bytes()).hexdigest()
+        if got != src.sha256:
+            raise ValueError(
+                f"경로 테이블 해시 불일치: {path}\n  config={src.sha256}\n  실제  ={got}\n"
+                "데이터가 바뀌었다. 이전 결과와 비교할 수 없으므로 멈춘다."
+            )
+
+    mat = loadmat(path)
+    if src.var not in mat:
+        raise KeyError(f"{path} 에 변수 {src.var!r} 가 없다. 있는 것: "
+                       f"{[k for k in mat if not k.startswith('__')]}")
+    arr = np.asarray(mat[src.var], dtype=float)
+    if arr.ndim != 2 or max(src.s_row, src.kappa_row) >= arr.shape[0]:
+        raise ValueError(f"{src.var} shape={arr.shape} 에서 행 "
+                         f"s_row={src.s_row}, kappa_row={src.kappa_row} 를 뽑을 수 없다.")
+    s = arr[src.s_row].astype(float)
+    k = arr[src.kappa_row].astype(float)
+
+    if np.any(np.diff(s) <= 0.0):
+        raise ValueError("테이블의 s 가 단조증가가 아니다.")
+    s = s - s[0]           # 0 에서 시작하도록 이동 (호길이 원점 규약)
+    return s, k
 
 
 class Reference:
     """kappa(s) 곡률 프로파일과 속도 프로파일, 프리뷰 제공자.
 
     vx_range 는 차량 config 에서 온다(경로 자체 속성이 아니므로 주입받는다).
+    곡률 정의는 합성(segments) 또는 테이블(table) 둘 중 하나에서 오지만, 어느 쪽이든
+    (s_nodes, k_nodes) 선형 보간으로 귀결되므로 이후 로직은 동일하다.
     """
 
     def __init__(self, path_cfg: PathConfig, vx_range: tuple[float, float]):
@@ -29,19 +79,25 @@ class Reference:
         if not (self.vx_hi > self.vx_lo > 0.0):
             raise ValueError(f"vx_range 가 유효하지 않다: {vx_range}")
 
-        # 세그먼트 경계 호길이 s_nodes 와 각 경계의 곡률 k_nodes.
-        # k_nodes[0] = 0 (직선에서 출발), k_nodes[i] = segments[i-1].kappa_end.
-        # 구간 내부는 이 노드들의 선형 보간(np.interp)이 곧 조각선형 kappa(s)다.
-        s = 0.0
-        s_nodes = [0.0]
-        k_nodes = [0.0]
-        for seg in path_cfg.segments:
-            s += seg.length
-            s_nodes.append(s)
-            k_nodes.append(seg.kappa_end)
-        self._s_nodes = np.asarray(s_nodes, dtype=float)
-        self._k_nodes = np.asarray(k_nodes, dtype=float)
-        self.total_length = float(s_nodes[-1])
+        if path_cfg.table is not None:
+            # 외부 트랙: 이미 촘촘히 샘플된 kappa(s) 를 노드로 그대로 쓴다.
+            s_nodes, k_nodes = load_kappa_table(path_cfg.table)
+            self._s_nodes = s_nodes
+            self._k_nodes = k_nodes
+        else:
+            # 합성 경로: 세그먼트 경계 호길이 s_nodes 와 각 경계의 곡률 k_nodes.
+            # k_nodes[0] = 0 (직선에서 출발), k_nodes[i] = segments[i-1].kappa_end.
+            # 구간 내부는 이 노드들의 선형 보간(np.interp)이 곧 조각선형 kappa(s)다.
+            s = 0.0
+            s_list = [0.0]
+            k_list = [0.0]
+            for seg in path_cfg.segments:
+                s += seg.length
+                s_list.append(s)
+                k_list.append(seg.kappa_end)
+            self._s_nodes = np.asarray(s_list, dtype=float)
+            self._k_nodes = np.asarray(k_list, dtype=float)
+        self.total_length = float(self._s_nodes[-1])
 
     # ------------------------------------------------------------------ #
     # 곡률 · 속도 프로파일                                                 #
