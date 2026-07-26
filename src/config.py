@@ -421,6 +421,45 @@ class EkfConfig:
 
 
 @dataclass(frozen=True)
+class StateKfConfig:
+    """공통 상태추정기(명목 4상태 순수 KF) 설정 (Phase 8d).
+
+    **모델 보정자인 EkfConfig 와 역할이 다르다** — 이쪽은 측정 잡음을 걸러 MPC 피드백에
+    넣을 상태를 만드는 것이 전부다(`src/estimation/state_estimator.py`).
+    이 그룹을 참조하면 **세 케이스 모두** 필터링된 x_hat 을 피드백받는다. 참조하지
+    않으면 종전대로 생측정값(또는 센서가 없으면 참 상태)이 그대로 들어간다.
+
+    상태 순서 = [v_y, gamma, e_psi, e_y] (4). 측정도 전상태 4채널.
+    이름은 MPC 가중치(W_/R_)·모델보정 KF(Q_kf/R_kf)와 겹치지 않게 Q_diag/R_diag 로 둔다.
+    """
+    Q_diag: tuple[float, ...]
+    R_diag: tuple[float, ...]
+    P0_diag: tuple[float, ...]
+    tuning_method: str = "manual"
+    tuning_budget_closed_loop_evals: int = 0
+    tuning_selection_scenario: str = ""
+
+    def __post_init__(self) -> None:
+        for name, n in (("Q_diag", 4), ("R_diag", 4), ("P0_diag", 4)):
+            v = getattr(self, name)
+            if len(v) != n:
+                raise ValueError(f"StateKfConfig.{name} 는 길이 {n} (got {len(v)}).")
+            if any(c < 0.0 for c in v):
+                raise ValueError(f"StateKfConfig.{name} 성분은 음수가 아니어야 한다.")
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "StateKfConfig":
+        return cls(
+            Q_diag=tuple(float(v) for v in d["Q_diag"]),
+            R_diag=tuple(float(v) for v in d["R_diag"]),
+            P0_diag=tuple(float(v) for v in d["P0_diag"]),
+            tuning_method=str(d.get("tuning_method", "manual")),
+            tuning_budget_closed_loop_evals=int(d.get("tuning_budget_closed_loop_evals", 0)),
+            tuning_selection_scenario=str(d.get("tuning_selection_scenario", "")),
+        )
+
+
+@dataclass(frozen=True)
 class SensorConfig:
     """상태 측정 센서 모델 (Phase 8c).
 
@@ -548,6 +587,7 @@ class ExperimentConfig:
     ekf: "EkfConfig | None" = None
     gp: "GpConfig | None" = None
     sensor: "SensorConfig | None" = None
+    state_kf: "StateKfConfig | None" = None
     plant: str = "linear"
     # 조합 파일이 참조한 그룹 이름 -> config 이름 (재현성 스냅샷에 남긴다).
     raw_refs: dict[str, str] = field(default_factory=dict)
@@ -579,6 +619,8 @@ class ExperimentConfig:
             snap["gp"] = _dataclass_to_plain(self.gp)
         if self.sensor is not None:
             snap["sensor"] = _dataclass_to_plain(self.sensor)
+        if self.state_kf is not None:
+            snap["state_kf"] = _dataclass_to_plain(self.state_kf)
         return snap
 
 
@@ -592,6 +634,7 @@ _GROUP_LOADERS = {
     "ekf": EkfConfig.from_dict,
     "gp": GpConfig.from_dict,
     "sensor": SensorConfig.from_dict,
+    "state_kf": StateKfConfig.from_dict,
 }
 
 
@@ -692,6 +735,7 @@ def load_experiment(name: str, configs_dir: Path = CONFIGS_DIR) -> ExperimentCon
         ekf=groups["ekf"],
         gp=groups["gp"],
         sensor=groups["sensor"],
+        state_kf=groups["state_kf"],
         plant=plant,
         raw_refs=refs,
         overrides=dict(overrides),
