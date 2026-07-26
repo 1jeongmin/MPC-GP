@@ -18,8 +18,8 @@
 
 ## 1. 지시받은 모델링 순서와 진행 현황
 
-주신 4단계에 대한 대응이다. **3번의 MATLAB 버전만 미진행**이고 나머지는 완료했으며,
-4번 이후로 추가 작업이 상당히 진행됐다(§2).
+주신 4단계에 대한 대응이다. **1~4번 모두 완료**했고, 4번 이후로 추가 작업이 상당히
+진행됐다(§2). 3번은 Python/MATLAB 두 선택지 중 **Python을 채택**해 구현했다(사유는 아래).
 
 ### 1번 — State equation formulation ✅
 
@@ -114,9 +114,18 @@ $a_{y,max}$를 올리면 타이어가 비선형 영역으로 더 들어가 잔�
 
 ($\alpha_{sl}\approx15.4°$. $a_y$=4~6이 비선형–비포화 영역 → GP 실험 구간으로 채택)
 
-### 3번 — 잔차 없이 path tracking control 구현
+### 3번 — 잔차 없이 path tracking control 구현 ✅ (Python 채택)
 
-#### Python ✅ 완료
+Python과 MATLAB 두 선택지 중 **Python으로 구현했다.** 이유:
+
+- 4번(잔차 모델링)의 GP를 **MPC 예측식 안에 직접 결합**해야 하는데, CasADi로 GP 평균을
+  심볼릭 표현으로 만들어 IPOPT NLP에 파라미터로 주입하면 이 결합이 자연스럽게 된다.
+  MATLAB Vehicle Dynamics Blockset은 차량 모델은 편하지만 이 결합 경로가 매끄럽지 않다.
+- 명목 모델을 직접 유도해 쓰기로 한 이상(1번), 블록셋의 기성 차량 모델을 쓰면 오히려
+  **잔차의 출처를 타이어 하나로 통제**한다는 실험 설계가 깨진다.
+- config 기반 실험 관리·재현성 스냅샷·물리 게이트 테스트를 한 스택에서 처리할 수 있다.
+
+MATLAB 병행 구현은 계획에 없다. 필요하시면 말씀해 주시면 진행하겠다.
 
 요구사항 전부 충족:
 
@@ -149,11 +158,6 @@ $$\text{s.t.}\quad X_{k+1}=F(X_k,U_k,v_{x,k},\kappa_k),\quad |\delta|\le\delta_{
 - warm start + IPOPT 수렴 실패 시 fallback(이전 해 shift) 구현.
 
 **실시간성**: 폐루프 solve time mean **9.2 ms** (`dt_ctrl` = 20 ms), `dt_ctrl` 초과율 0%.
-
-#### MATLAB ⬜ 미진행
-
-Vehicle Dynamics Blockset 기반 별도 구현은 **아직 하지 않았다.** Python 쪽에서 4번(잔차
-모델링) 이후 작업이 예상보다 확장되어 그쪽을 우선했다. 필요하시면 다음 순서로 진행하겠다.
 
 ### 4번 — 잔차 모델링 ✅ (KF + GPR 모두 완료)
 
@@ -431,7 +435,6 @@ config에 sha256을 고정해 두어 파일이 바뀌면 즉시 중단된다.
 
 ### 예정 작업
 
-- **MATLAB 구현** (지시 3번의 미진행분) — Vehicle Dynamics Blockset 기반
 - **Part 2: GP 실시간화** — online / sparse / sliding-window GP.
   `src/gp/{online,sparse,sliding_window}.py`가 현재 스텁. 주 지표는 solve time 분포와
   `dt_ctrl` 초과율. 네 변형이 같은 인터페이스를 구현해 runner가 변형을 몰라야 한다.
