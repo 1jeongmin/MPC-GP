@@ -1,0 +1,7 @@
+# Part 1 / 레이싱 트랙 계열 / 케이스 = MPC only / 시나리오 (d) 형상외삽 (right_turn).
+# a_y_max 는 rt_ay4 와 동일한 4.0 으로 통제하고 경로 형상만 바꾼다(right_turn.yaml 참조).
+vehicle: sedan
+sim: racetrack
+path: right_turn
+mpc: default
+plant: nonlinear

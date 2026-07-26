@@ -1,0 +1,32 @@
+# 우회전 전용 트랙 — GP #2(racetrack) 계열의 **형상외삽** 축 (dlc 가 GP #1 에게 하는
+# 역할과 동일). 출처: 자율주행이론 실습 1차 배포본 `path_data_right_turn.mat`.
+#   map = [s; x; y; theta; kappa]  (5 x 1025), ds = 0.5 m 균일, 총 512.0 m 폐곡선.
+#
+# racetrack.yaml(좌 57.9% / 우 20.4% / 직선 21.7%, 혼합)과 달리 이 트랙은
+# **kappa <= 0 뿐 — 76.2% 우회전, 0% 좌회전.** GP #2 딕셔너리가 이미 양쪽 부호를
+# 어느 정도 커버하고 있어서(gamma>0 69점/gamma<0 29점, 대칭에 가까운 범위) 방향
+# 반전만으로는 새 영역이 안 나온다고 판단, 강의 자료의 별도 트랙으로 대체했다.
+#
+# **경험적 검증** (2026-07-27, GP #2 로 이 트랙에서 명목 MPC 주행 후 사후분산 측정):
+#   학습트랙 자체 사후 std(v_y) 평균 5.86e-4 대비 이 트랙에서 **평균 2.0배, 최대 14.1배**
+#   증가(gamma 채널 평균 3.0배). 주행의 90.4%가 gamma<0. 방향 반전과 달리 실제로
+#   GP 가 덜 본 영역으로 간다 — 형상외삽 시나리오로 채택.
+#
+# 데이터 검증: |dtheta/ds - kappa| max 3.44e-4 (자기정합), dkappa/ds max 1.37e-3 1/m^2
+# (계단형 없음), kappa in [-0.0200, 0.0000], R_min = 50.0 m.
+# a_y=4.0 -> vx_min 14.14 m/s (sedan vx_range [5,25] 안). 예상 소요 ~29.5 s.
+#
+# **형상만 바꾼다 — a_y_max 는 racetrack.yaml 의 in-distribution 값(4.0)과 동일하게
+# 고정한다.** 강도축과 형상축을 분리하는 원칙(part1_mpc_only_dlc.yaml 과 동일 이유).
+
+a_y_max: 4.0             # m/s^2. racetrack.yaml in-distribution 과 동일 (강도 통제)
+kappa_eps: 1.0e-4        # 1/m, 직선 취급 임계
+kappa_max: 0.0200        # 1/m, 참고용 (R_min = 50.0 m). 빌더는 쓰지 않는다.
+
+table:
+  file: data/path/path_data_right_turn.mat   # 저장소 루트 기준. data/ 는 git 제외.
+  kind: mat
+  var: map
+  s_row: 0               # map 행 0 = 호길이 s [m]
+  kappa_row: 4           # map 행 4 = 곡률 kappa [1/m]
+  sha256: 3766cf626aa643a9abed385e97d9b4dd697fa1237a04fe90aff8c10b157606ef

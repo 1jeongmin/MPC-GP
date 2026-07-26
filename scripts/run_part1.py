@@ -39,7 +39,9 @@ CASES = ("mpc_only", "kf", "gp")
 # 트랙 시나리오를 따로 둔 이유: 합성 경로는 GP 가 학습한 것과 같은 생성기에서 나오므로
 # 잔차 구조가 설계에 유리하게 치우쳤을 가능성이 남는다. 외부 트랙은 그 밖이다.
 SCENARIOS_SYNTHETIC = ("ay4", "ay6", "dlc")
-SCENARIOS_RACETRACK = ("rt_ay4", "rt_ay6")
+# rt_rturn = racetrack GP(#2)의 형상외삽 축 — right_turn.mat(76.2% 우회전 전용).
+# a_y_max 는 rt_ay4 와 동일(4.0)하게 통제, 경로 형상만 다르다(dlc 와 같은 원칙).
+SCENARIOS_RACETRACK = ("rt_ay4", "rt_ay6", "rt_rturn")
 # rtn_* = 레이싱 트랙 + 현실적 센서 잡음 (Phase 8c). rt_* 와 sensor 그룹만 다르다.
 SCENARIOS_NOISY = ("rtn_ay4", "rtn_ay6")
 SCENARIOS = SCENARIOS_SYNTHETIC + SCENARIOS_RACETRACK + SCENARIOS_NOISY
