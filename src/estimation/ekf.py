@@ -132,6 +132,16 @@ class AugmentedKF:
         self.P = (I - K @ H) @ self.P
         self.P = 0.5 * (self.P + self.P.T)
 
+    def select_measurement(self, y_full4: np.ndarray) -> np.ndarray:
+        """이미 만들어진 측정 상태(4,)에서 이 필터의 측정 채널만 뽑는다.
+
+        외부 센서(src/sim/sensor.py)가 주입된 경우 쓰는 경로다. 차량에 센서는 한 벌이므로
+        제어기와 필터가 **같은 측정값**을 봐야 한다 — 여기서 잡음을 새로 만들지 않는다.
+        (센서가 없을 때만 simulate_measurement 로 자체 잡음을 만든다.)
+        """
+        y = np.asarray(y_full4, float).reshape(4)
+        return np.array([y[r] for r in MEAS_ROWS])
+
     def simulate_measurement(self, x_true4: np.ndarray, rng: np.random.Generator) -> np.ndarray:
         """참 플랜트 상태(4,)에서 잡음 섞인 측정 y를 생성한다.
 

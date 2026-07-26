@@ -146,10 +146,17 @@ def build_case(exp: ExperimentConfig) -> Case:
 
 def run_case(case: Case, exp: ExperimentConfig,
              rng: np.random.Generator | None = None) -> dict[str, np.ndarray]:
-    """조립된 케이스로 폐루프를 돌린다. seed 는 config 에서 온다 (재현성)."""
+    """조립된 케이스로 폐루프를 돌린다. seed 는 config 에서 온다 (재현성).
+
+    센서는 experiment 의 `sensor` 그룹 참조 여부로 갈린다 — 참조하지 않으면 None 이
+    되어 종전대로 참 상태 피드백(이상적 센서)이다. 여기서도 케이스 분기는 없다.
+    """
     from src.sim.runner import run_closed_loop
+    from src.sim.sensor import make_sensor
 
     if rng is None:
         rng = np.random.default_rng(exp.sim.seed)
+    sensor = make_sensor(exp.sensor, rng)
     return run_closed_loop(case.controller, case.reference, case.plant_rhs,
-                           case.nominal_step, exp.sim, estimator=case.estimator, rng=rng)
+                           case.nominal_step, exp.sim, estimator=case.estimator,
+                           rng=rng, sensor=sensor)

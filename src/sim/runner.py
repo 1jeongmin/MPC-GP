@@ -34,6 +34,7 @@ def run_closed_loop(
     stop_margin: float = 5.0,
     estimator=None,
     rng: np.random.Generator | None = None,
+    sensor=None,
 ) -> dict[str, np.ndarray]:
     """다중레이트 폐루프를 돌리고 로그(배열 dict)를 반환한다.
 
@@ -49,7 +50,12 @@ def run_closed_loop(
                StepModel 이 estimator.d_hat 를 스스로 참조하므로 runner 는 추정기를
                "돌리기만" 하면 된다. **케이스 분기(if case==...) 없음.**
                제어 피드백은 세 케이스 모두 참 상태 x 를 쓴다 (통제변수 고정).
-    rng: 측정 잡음용 난수 생성기 (재현성). estimator 있으면 필요.
+    rng: 측정 잡음용 난수 생성기 (재현성). estimator 나 sensor 가 있으면 필요.
+    sensor: 선택적 StateSensor. 있으면 **제어 피드백에 들어가는 상태가 측정값으로
+            바뀐다** (Phase 8c). 없으면 종전대로 참 상태 피드백(이상적 센서)이라
+            기존 결과가 그대로 재현된다.
+            센서가 있으면 estimator 도 **같은 측정값**을 받는다 — 차량에 센서는
+            한 벌뿐이고, 세 케이스가 같은 잡음 실현을 봐야 비교가 성립한다.
     """
     from src.sim.logger import Log
 
@@ -59,7 +65,7 @@ def run_closed_loop(
     s = 0.0
     u_prev = 0.0
     vx_prev = kappa_prev = None
-    if estimator is not None and rng is None:
+    if (estimator is not None or sensor is not None) and rng is None:
         rng = np.random.default_rng(sim_cfg.seed)
     controller.reset()
     log = Log()
@@ -69,15 +75,23 @@ def run_closed_loop(
         preview = Preview.from_arrays(kappa_arr, vx_arr)
         vx_now, kappa_now = float(vx_arr[0]), float(kappa_arr[0])
 
+        # 센서: 스텝당 정확히 한 번만 호출한다 (잡음 수열 재현성).
+        # 센서가 없으면 x_meas is x — 참 상태 피드백(이상적 센서, 종전 동작).
+        x_meas = x if sensor is None else sensor.measure(x, k * dt)
+
         # 추정기: 이전 스텝에서 이번으로 예측 후, 이번 측정으로 갱신.
+        # 센서가 있으면 그 측정값을 그대로 쓴다(센서는 한 벌). 없으면 추정기가
+        # 자기 R_kf 로 잡음을 만들어 쓴다(종전 경로).
         if estimator is not None:
             if k > 0:
                 estimator.predict(u_prev, vx_prev, kappa_prev)
-            y = estimator.simulate_measurement(x, rng)
+            y = (estimator.simulate_measurement(x, rng) if sensor is None
+                 else estimator.select_measurement(x_meas))
             estimator.update(y)
 
-        # 제어: 참 상태 피드백 (통제). StepModel 이 d_hat 를 스스로 참조해 주입.
-        u, info = controller.solve(x, preview, u_prev)
+        # 제어: 측정 상태 피드백. 세 케이스 모두 같은 x_meas 를 받는다 (통제변수).
+        # StepModel 이 d_hat / mu_hat 를 스스로 참조해 주입한다.
+        u, info = controller.solve(x_meas, preview, u_prev)
 
         # 잔차: 명목 이산 1스텝 예측 (MPC 예측과 같은 함수, 항상 명목 대비).
         x_nom_next = np.array(nominal_step_fn(x, u, vx_now, kappa_now)).reshape(4)
@@ -85,7 +99,8 @@ def run_closed_loop(
         residual = x_plant_next - x_nom_next
 
         row = dict(
-            t=k * dt, x=x.copy(), delta=u, vx=vx_now, kappa=kappa_now, s=s,
+            t=k * dt, x=x.copy(), x_meas=np.asarray(x_meas, float).copy(),
+            delta=u, vx=vx_now, kappa=kappa_now, s=s,
             solve_time=info.solve_time, ipopt_iter=info.iterations,
             converged=info.converged, fallback=info.fallback_used,
             residual=residual,

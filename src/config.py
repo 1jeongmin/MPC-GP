@@ -368,6 +368,57 @@ class EkfConfig:
 
 
 @dataclass(frozen=True)
+class SensorConfig:
+    """상태 측정 센서 모델 (Phase 8c).
+
+    Phase 8 까지는 세 케이스 모두 **참 상태**를 피드백받았다(이상적 센서). 이 그룹을
+    참조하면 제어 피드백에 들어가는 상태가 잡음 섞인 측정값으로 바뀐다.
+    그룹을 참조하지 않으면 종전대로 이상적 센서다 — 기존 결과가 그대로 재현된다.
+
+    채널 순서는 상태와 동일: [v_y, gamma, e_psi, e_y].
+    단위: noise_std [m/s, rad/s, rad, m], bias_amp 동일, bias_freq_hz [Hz].
+
+    측정 모델:
+        y_k = x_k + n_k + b*sin(2*pi*f*t_k)
+        n_k ~ N(0, diag(noise_std^2))          # 백색잡음 (기본)
+        b, f                                    # 결정론적 사인 바이어스 (기본 0)
+
+    **사인 바이어스는 기본 0 이다.** 결정론적 바이어스는 KF 의 영평균 잡음 가정을
+    깨서 비교군을 부당하게 약화시킨다(ekf-baseline.md 「의도적/실수로 낮추는 설정」).
+    쓰려면 그 사실을 리포트에 명시하고 R_kf 도 함께 재검토하라.
+    """
+    noise_std: tuple[float, ...]
+    bias_amp: tuple[float, ...] = (0.0, 0.0, 0.0, 0.0)
+    bias_freq_hz: float = 0.0
+    note: str = ""
+
+    def __post_init__(self) -> None:
+        if len(self.noise_std) != 4:
+            raise ValueError(f"noise_std 는 길이 4 (got {len(self.noise_std)}).")
+        if len(self.bias_amp) != 4:
+            raise ValueError(f"bias_amp 는 길이 4 (got {len(self.bias_amp)}).")
+        for name in ("noise_std", "bias_amp"):
+            if any(v < 0.0 for v in getattr(self, name)):
+                raise ValueError(f"SensorConfig.{name} 성분은 음수가 아니어야 한다.")
+        if self.bias_freq_hz < 0.0:
+            raise ValueError("bias_freq_hz 는 음수가 아니어야 한다.")
+
+    @property
+    def noise_var(self) -> tuple[float, ...]:
+        """잡음 분산 (R_kf 를 센서 사양에 맞출 때 쓴다)."""
+        return tuple(s * s for s in self.noise_std)
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "SensorConfig":
+        return cls(
+            noise_std=tuple(float(v) for v in d["noise_std"]),
+            bias_amp=tuple(float(v) for v in d.get("bias_amp", (0.0,) * 4)),
+            bias_freq_hz=float(d.get("bias_freq_hz", 0.0)),
+            note=str(d.get("note", "")),
+        )
+
+
+@dataclass(frozen=True)
 class GpConfig:
     """offline GP 설정 (.claude/rules/gp-residual.md).
 
@@ -443,6 +494,7 @@ class ExperimentConfig:
     mpc: "MpcConfig | None" = None
     ekf: "EkfConfig | None" = None
     gp: "GpConfig | None" = None
+    sensor: "SensorConfig | None" = None
     plant: str = "linear"
     # 조합 파일이 참조한 그룹 이름 -> config 이름 (재현성 스냅샷에 남긴다).
     raw_refs: dict[str, str] = field(default_factory=dict)
@@ -472,6 +524,8 @@ class ExperimentConfig:
             snap["ekf"] = _dataclass_to_plain(self.ekf)
         if self.gp is not None:
             snap["gp"] = _dataclass_to_plain(self.gp)
+        if self.sensor is not None:
+            snap["sensor"] = _dataclass_to_plain(self.sensor)
         return snap
 
 
@@ -484,6 +538,7 @@ _GROUP_LOADERS = {
     "mpc": MpcConfig.from_dict,
     "ekf": EkfConfig.from_dict,
     "gp": GpConfig.from_dict,
+    "sensor": SensorConfig.from_dict,
 }
 
 
@@ -583,6 +638,7 @@ def load_experiment(name: str, configs_dir: Path = CONFIGS_DIR) -> ExperimentCon
         mpc=groups["mpc"],
         ekf=groups["ekf"],
         gp=groups["gp"],
+        sensor=groups["sensor"],
         plant=plant,
         raw_refs=refs,
         overrides=dict(overrides),

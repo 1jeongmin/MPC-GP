@@ -40,12 +40,14 @@ CASES = ("mpc_only", "kf", "gp")
 # 잔차 구조가 설계에 유리하게 치우쳤을 가능성이 남는다. 외부 트랙은 그 밖이다.
 SCENARIOS_SYNTHETIC = ("ay4", "ay6", "dlc")
 SCENARIOS_RACETRACK = ("rt_ay4", "rt_ay6")
-SCENARIOS = SCENARIOS_SYNTHETIC + SCENARIOS_RACETRACK
+# rtn_* = 레이싱 트랙 + 현실적 센서 잡음 (Phase 8c). rt_* 와 sensor 그룹만 다르다.
+SCENARIOS_NOISY = ("rtn_ay4", "rtn_ay6")
+SCENARIOS = SCENARIOS_SYNTHETIC + SCENARIOS_RACETRACK + SCENARIOS_NOISY
 
 # 케이스 간 **반드시 동일**해야 하는 스냅샷 키 (sim-experiment.md 「통제해야 할 변수」).
 # 경로 형상·vx 프로파일은 path 에, MPC 지평·가중치·IPOPT 옵션은 mpc 에,
 # 초기조건·seed·적분기 설정은 sim 에, 플랜트 모델은 plant 에 들어 있다.
-CONTROLLED_KEYS = ("vehicle", "sim", "path", "mpc", "plant")
+CONTROLLED_KEYS = ("vehicle", "sim", "path", "mpc", "plant", "sensor")
 
 
 def experiment_name(case: str, scenario: str) -> str:
