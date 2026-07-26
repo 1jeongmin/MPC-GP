@@ -151,12 +151,17 @@ def run_case(case: Case, exp: ExperimentConfig,
     센서는 experiment 의 `sensor` 그룹 참조 여부로 갈린다 — 참조하지 않으면 None 이
     되어 종전대로 참 상태 피드백(이상적 센서)이다. 여기서도 케이스 분기는 없다.
     """
+    from src.estimation.state_estimator import make_state_kf
     from src.sim.runner import run_closed_loop
     from src.sim.sensor import make_sensor
 
     if rng is None:
         rng = np.random.default_rng(exp.sim.seed)
     sensor = make_sensor(exp.sensor, rng)
+    # 공통 상태추정기: state_kf 그룹 참조 여부로만 갈린다 — 케이스와 무관하게
+    # 세 케이스가 동일하게 받는다(통제변수). 모델 보정자(case.estimator)와 별개다.
+    state_est = (None if exp.state_kf is None
+                 else make_state_kf(exp.vehicle, exp.state_kf, exp.sim.dt_ctrl))
     return run_closed_loop(case.controller, case.reference, case.plant_rhs,
                            case.nominal_step, exp.sim, estimator=case.estimator,
-                           rng=rng, sensor=sensor)
+                           rng=rng, sensor=sensor, state_estimator=state_est)

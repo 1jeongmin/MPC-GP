@@ -1,0 +1,16 @@
+# Part 1 / 레이싱 트랙 + 센서 잡음 + **공통 상태추정기** / 케이스 = mpc_only /
+# 시나리오 rtf_ay6. rtn_ay6 과 동일하고 state_kf 그룹만 추가된다.
+#
+# rtn_* (생측정값 피드백)과의 차이: 세 케이스 모두 명목 4상태 순수 KF 로
+# 한 번 거른 x_hat 을 제어 피드백으로 받는다(상태추정 품질이 통제변수).
+# 이 필터는 **상태추정 전용**이라 모델 보정에는 관여하지 않는다 — 케이스를
+# 가르는 차이는 여전히 모델 보정 방식(없음 / KF d_hat / GP mu_hat) 하나다.
+vehicle: sedan
+sim: racetrack
+path: racetrack
+mpc: default
+plant: nonlinear
+sensor: realistic
+state_kf: default
+overrides:
+  path.a_y_max: 6.0

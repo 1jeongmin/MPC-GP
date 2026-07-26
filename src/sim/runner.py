@@ -35,6 +35,7 @@ def run_closed_loop(
     estimator=None,
     rng: np.random.Generator | None = None,
     sensor=None,
+    state_estimator=None,
 ) -> dict[str, np.ndarray]:
     """다중레이트 폐루프를 돌리고 로그(배열 dict)를 반환한다.
 
@@ -56,6 +57,11 @@ def run_closed_loop(
             기존 결과가 그대로 재현된다.
             센서가 있으면 estimator 도 **같은 측정값**을 받는다 — 차량에 센서는
             한 벌뿐이고, 세 케이스가 같은 잡음 실현을 봐야 비교가 성립한다.
+    state_estimator: 선택적 StateKF — **공통 상태추정기**(Phase 8d). 있으면 측정값을
+            걸러 그 x_hat 을 제어 피드백에 넣는다. **세 케이스가 동일하게 이걸 쓴다**
+            (상태추정 품질이 통제변수). 없으면 종전대로 측정값이 그대로 들어간다.
+            모델 보정자인 `estimator`(증강 KF)와 **역할이 다르다** — 이쪽은 상태만
+            만들고 모델 보정에는 관여하지 않는다 (ekf-baseline.md 역할 혼동 금지).
     """
     from src.sim.logger import Log
 
@@ -79,7 +85,7 @@ def run_closed_loop(
         # 센서가 없으면 x_meas is x — 참 상태 피드백(이상적 센서, 종전 동작).
         x_meas = x if sensor is None else sensor.measure(x, k * dt)
 
-        # 추정기: 이전 스텝에서 이번으로 예측 후, 이번 측정으로 갱신.
+        # 모델보정용 증강 KF: 이전 스텝에서 이번으로 예측 후, 이번 측정으로 갱신.
         # 센서가 있으면 그 측정값을 그대로 쓴다(센서는 한 벌). 없으면 추정기가
         # 자기 R_kf 로 잡음을 만들어 쓴다(종전 경로).
         if estimator is not None:
@@ -89,9 +95,18 @@ def run_closed_loop(
                  else estimator.select_measurement(x_meas))
             estimator.update(y)
 
-        # 제어: 측정 상태 피드백. 세 케이스 모두 같은 x_meas 를 받는다 (통제변수).
+        # 공통 상태추정기: 같은 측정값을 걸러 제어 피드백용 상태를 만든다.
+        # 세 케이스가 **동일하게** 이 경로를 탄다 — 상태추정 품질이 통제변수다.
+        # 없으면 측정값(센서 없으면 참 상태)이 그대로 피드백된다.
+        if state_estimator is not None:
+            x_fb = state_estimator.filter_step(x_meas, u_prev, vx_prev, kappa_prev,
+                                               first=(k == 0))
+        else:
+            x_fb = x_meas
+
+        # 제어: 세 케이스 모두 같은 x_fb 를 받는다 (통제변수).
         # StepModel 이 d_hat / mu_hat 를 스스로 참조해 주입한다.
-        u, info = controller.solve(x_meas, preview, u_prev)
+        u, info = controller.solve(x_fb, preview, u_prev)
 
         # 잔차: 명목 이산 1스텝 예측 (MPC 예측과 같은 함수, 항상 명목 대비).
         x_nom_next = np.array(nominal_step_fn(x, u, vx_now, kappa_now)).reshape(4)
@@ -100,6 +115,7 @@ def run_closed_loop(
 
         row = dict(
             t=k * dt, x=x.copy(), x_meas=np.asarray(x_meas, float).copy(),
+            x_fb=np.asarray(x_fb, float).copy(),   # 제어기가 실제로 받은 상태
             delta=u, vx=vx_now, kappa=kappa_now, s=s,
             solve_time=info.solve_time, ipopt_iter=info.iterations,
             converged=info.converged, fallback=info.fallback_used,
@@ -113,6 +129,8 @@ def run_closed_loop(
                 ekf_innovation=estimator.innovation.copy(),
                 ekf_d_hat=estimator.d_hat,
             )
+        if state_estimator is not None:
+            row.update(skf_P_diag=state_estimator.P_diag)
         # 컨트롤러 쪽 스텝 로그 훅 (GP 케이스의 gp_mean/gp_var 등). 케이스 분기 없음:
         # runner 는 무엇이 실리는지 모르고, 있으면 그대로 합류시킨다.
         extra = controller.step_log()
