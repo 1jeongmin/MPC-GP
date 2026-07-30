@@ -300,6 +300,11 @@ class MpcConfig:
     # 그대로 남으므로 어떤 옵션으로 돌렸는지는 여전히 기록된다.
     # frozen dataclass 라 해시 가능해야 해서 dict 가 아니라 튜플이다.
     ipopt_extra: tuple[tuple[str, Any], ...] = ()
+    # 입력 블로킹 (제어 호라이즌 < 예측 호라이즌). (블록크기, 개수) 쌍의 런렝스 표현.
+    # **비어 있으면 블로킹 없음** = 전 스텝 자유 입력 = 종전 동작 (기존 결과 재현성 보존).
+    # 예: ((1, 20), (4, 5), (10, 1)) -> 1*20 + 4*5 + 10*1 = 50 스텝을 26 DOF 로.
+    # 근거·주의는 mpc-solver.md 「지평을 늘릴 때」 참조.
+    u_blocks: tuple[tuple[int, int], ...] = ()
 
     def __post_init__(self) -> None:
         if not (isinstance(self.N, int) and self.N > 0):
@@ -311,6 +316,39 @@ class MpcConfig:
                 raise ValueError(f"MpcConfig.{name} 는 음수가 아니어야 한다 (got {val}).")
         if not (self.ipopt_max_iter > 0):
             raise ValueError(f"ipopt_max_iter 는 양수여야 한다 (got {self.ipopt_max_iter}).")
+        if self.u_blocks:
+            for size, count in self.u_blocks:
+                if size < 1 or count < 1:
+                    raise ValueError(
+                        f"u_blocks 성분은 (크기>=1, 개수>=1) 이어야 한다 (got {(size, count)}).")
+            total = sum(size * count for size, count in self.u_blocks)
+            if total != self.N:
+                raise ValueError(
+                    f"u_blocks 의 스텝 총합이 N 과 달라 지평을 덮지 못한다: "
+                    f"{total} != N={self.N}. 조용히 어긋나면 진단이 불가능하므로 거부한다.")
+            if self.u_blocks[0][0] != 1:
+                raise ValueError(
+                    "u_blocks 의 첫 블록 크기는 1 이어야 한다 — 실제로 플랜트에 적용되는 "
+                    "입력은 u_0 뿐이고, 그 스텝만은 조향 rate 하드제약을 정확히 지켜야 한다.")
+
+    # ------------------------------------------------------------------ #
+    # 입력 블로킹 파생값 (블로킹이 없으면 전 스텝 자유와 동일한 값을 준다)  #
+    # ------------------------------------------------------------------ #
+    def u_block_sizes(self) -> tuple[int, ...]:
+        """블록별 크기 [스텝]. 길이 = 입력 결정변수 개수."""
+        if not self.u_blocks:
+            return (1,) * self.N
+        out: list[int] = []
+        for size, count in self.u_blocks:
+            out.extend([size] * count)
+        return tuple(out)
+
+    def u_block_of_step(self) -> tuple[int, ...]:
+        """스텝 k -> 블록 인덱스. 길이 = N."""
+        out: list[int] = []
+        for b, size in enumerate(self.u_block_sizes()):
+            out.extend([b] * size)
+        return tuple(out)
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "MpcConfig":
@@ -334,6 +372,7 @@ class MpcConfig:
                 (str(k), v) for k, v in ip.items()
                 if k not in ("max_iter", "tol", "print_level")
             )),
+            u_blocks=tuple((int(s), int(c)) for s, c in d.get("u_blocks", ())),
         )
 
 

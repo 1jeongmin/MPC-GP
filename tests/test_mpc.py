@@ -74,15 +74,29 @@ def test_gate6_constraints_satisfied(vehicle, mpc_cfg) -> None:
     assert info.converged
 
     tol = 1e-6
-    U = info.U[0, :]
-    # 조향각 한계.
+    # 스텝 단위로 펼쳐서 본다. 입력 블로킹이 켜지면 info.U 는 블록당 1개이므로
+    # 그대로 diff 하면 경계 span 을 무시하게 된다 (mpc-solver.md 「지평을 늘릴 때」).
+    U = mpc.u_per_step(info.U)
+    assert U.shape == (mpc_cfg.N,), f"펼친 입력 길이 {U.shape} != N {mpc_cfg.N}"
+
+    # 조향각 한계 — 전 스텝.
     assert np.all(np.abs(U) <= vehicle.delta_max + tol), f"|delta| 한계 위반: {U.max()}"
-    # 조향각 변화율 한계 (k=0 은 u_prev 기준).
+
     drate = vehicle.delta_rate_max * DT
+    # **k=0 은 예외 없이 정확히 drate** — 실제로 플랜트에 적용되는 유일한 입력이다.
     du0 = U[0] - u_prev
     assert abs(du0) <= drate + tol, f"k=0 rate 위반: {du0} > {drate}"
-    du = np.diff(U)
-    assert np.all(np.abs(du) <= drate + tol), f"rate 위반: {np.abs(du).max()} > {drate}"
+
+    # 나머지는 블록 경계에서만 변할 수 있고, 그 허용치는 drate * span 이다.
+    # 블록 내부는 차이가 항등적으로 0 이어야 한다 (같은 결정변수를 참조하므로).
+    spans = dict(mpc.boundary_spans())
+    for k in range(1, mpc_cfg.N):
+        du = U[k] - U[k - 1]
+        if k in spans:
+            lim = drate * spans[k]
+            assert abs(du) <= lim + tol, f"k={k} 경계 rate 위반: {du} > {lim}"
+        else:
+            assert abs(du) <= tol, f"k={k} 는 블록 내부인데 입력이 변했다: {du}"
 
 
 # --------------------------------------------------------------------------- #
