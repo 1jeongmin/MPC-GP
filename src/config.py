@@ -295,6 +295,11 @@ class MpcConfig:
     ipopt_max_iter: int
     ipopt_tol: float
     ipopt_print_level: int
+    # 위 3개 외의 IPOPT 옵션을 그대로 통과시킨다 ((키, 값) 쌍, 키 순 정렬).
+    # 옵션을 하나 쓸 때마다 dataclass 필드를 늘리지 않기 위한 통로다. 재현성 스냅샷에
+    # 그대로 남으므로 어떤 옵션으로 돌렸는지는 여전히 기록된다.
+    # frozen dataclass 라 해시 가능해야 해서 dict 가 아니라 튜플이다.
+    ipopt_extra: tuple[tuple[str, Any], ...] = ()
 
     def __post_init__(self) -> None:
         if not (isinstance(self.N, int) and self.N > 0):
@@ -323,6 +328,12 @@ class MpcConfig:
             ipopt_max_iter=int(ip.get("max_iter", 200)),
             ipopt_tol=float(ip.get("tol", 1e-8)),
             ipopt_print_level=int(ip.get("print_level", 0)),
+            # 이름 있는 3개를 뺀 나머지는 손대지 않고 넘긴다. 정렬해 두면 스냅샷이
+            # YAML 키 순서에 흔들리지 않는다.
+            ipopt_extra=tuple(sorted(
+                (str(k), v) for k, v in ip.items()
+                if k not in ("max_iter", "tol", "print_level")
+            )),
         )
 
 

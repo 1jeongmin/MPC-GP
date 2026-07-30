@@ -45,3 +45,26 @@ ipopt:
   max_iter: 200
   tol: 1.0e-8
   print_level: 0
+
+  # ---- warm start 활성화 (2026-07-30) ----
+  # mpc_base.py 는 처음부터 이전 해를 shift 해 set_initial 로 넣고 있었으나, IPOPT
+  # 기본값이 warm_start_init_point=no 라 **그 초기추정을 버리고** 있었다(초기점을
+  # 경계 안쪽으로 밀어내고 배리어·승수를 매번 처음부터 잡는다). 즉 초기추정을
+  # 만들어 두고 쓰지 않던 상태였다.
+  #
+  # 측정 (loop10 전체 랩, 비선형 플랜트, N=50):
+  #   끄면  solve mean 11.34 ms  p95 13.63  IPOPT iter 4.5   RMS e_y 7.6630e-03
+  #   켜면  solve mean  8.79 ms  p95 14.22  IPOPT iter 2.8   RMS e_y 7.6630e-03
+  # 반복수 -38%, 평균 solve -22%. **RMS e_y 는 소수 5자리까지 동일** — 정확도를 팔아
+  # 속도를 산 것이 아니다. 수렴 실패 0. 상세는 mpc-solver.md 「솔버 운영」.
+  #
+  # "yes" 는 반드시 인용부호로 쓴다 — YAML 1.1 은 따옴표 없는 yes 를 boolean True 로
+  # 읽고, IPOPT 는 이 옵션에 문자열 "yes"/"no" 를 받는다.
+  warm_start_init_point: "yes"
+  # 초기점을 경계에서 얼마나 밀어낼지. 기본 0.01 은 warm start 를 무의미하게 만들 만큼
+  # 크다. 거의 0 으로 둬 이전 해를 그대로 쓰게 한다.
+  warm_start_bound_push: 1.0e-8
+  warm_start_mult_bound_push: 1.0e-8
+  # 배리어 파라미터 초기값. 기본 0.1 은 해에서 멀어 반복을 낭비한다. 이전 해 근처에서
+  # 출발하므로 작게 둔다.
+  mu_init: 1.0e-4

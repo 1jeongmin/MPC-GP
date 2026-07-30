@@ -159,12 +159,17 @@ class MpcBase:
         J += cfg_mpc.Wf_ey * X[3, N]**2 + cfg_mpc.Wf_epsi * X[2, N]**2
         opti.minimize(J)
 
-        opti.solver("ipopt", {"print_time": 0}, {
+        # IPOPT 옵션. config 가 단일 소스다 (하드코딩 금지).
+        # ipopt_extra 는 warm_start_init_point 등 이름 없는 옵션의 통로 —
+        # 아래 기본값보다 나중에 병합되므로 config 가 sb 까지 덮어쓸 수 있다.
+        ipopt_opts = {
             "max_iter": cfg_mpc.ipopt_max_iter,
             "tol": cfg_mpc.ipopt_tol,
             "print_level": cfg_mpc.ipopt_print_level,
             "sb": "yes",   # 시작 배너 억제 (결과에 무관한 표시 옵션)
-        })
+        }
+        ipopt_opts.update(dict(cfg_mpc.ipopt_extra))
+        opti.solver("ipopt", {"print_time": 0}, ipopt_opts)
 
         # 핸들 보관.
         self.opti = opti
