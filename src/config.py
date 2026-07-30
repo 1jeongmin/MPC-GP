@@ -269,9 +269,12 @@ class MpcConfig:
     단위: 지평 N [스텝], dt_ctrl [s], 가중치 [무차원 상대], IPOPT 옵션.
 
     비용:
-      sum_k [ W_ey*e_y^2 + W_epsi*e_psi^2 + W_vy*v_y^2 + W_gamma*gamma^2
+      sum_k [ W_ey*e_y^2 + W_epsi*e_psi^2 + W_vy*v_y^2 + W_gamma*(gamma - vx*kappa)^2
               + R_delta*delta^2 + R_ddelta*(delta_k - delta_{k-1})^2 ]
       + Wf_ey*e_y_N^2 + Wf_epsi*e_psi_N^2   (종단항)
+
+    W_gamma 만 참조 상대(gamma - vx*kappa)다. 곡선에서 필요한 요레이트가 0 이 아니므로
+    절대값을 벌주면 목적함수가 동역학 제약과 충돌한다 (mpc-solver.md 예외 규정).
 
     dt_ctrl 은 여기 두지 않는다 — 타이밍은 SimConfig 가 단일 소스이며,
     컨트롤러 생성 시 주입한다 (두 곳에 두면 어긋난다).

@@ -139,10 +139,19 @@ class MpcBase:
             u_prev_k = p_uprev if k == 0 else U[0, k - 1]
             opti.subject_to(opti.bounded(-drate, uk - u_prev_k, drate))
 
-            # 스테이지 비용 (x_ref/u_ref 없음 — kappa 프리뷰가 필요한 요레이트를 만든다).
+            # 스테이지 비용. gamma 만 참조 상대, 나머지는 절대값 (mpc-solver.md 예외 규정).
+            #
+            # 왜 gamma 만 빼는가: 곡선에서 '완벽추종'에 필요한 요레이트는 0 이 아니라
+            # vx*kappa 다. gamma^2 를 벌주면 목적함수가 동역학 제약과 반대 방향을 지시해
+            # e_y 에 정상편차가 남는다 (2026-07-27 진단: 일정곡률 편차 3.35e-3 -> 6.87e-4 m).
+            # 이 참조는 **순수 기구학(e_psi_dot = gamma - vx*kappa)** 이라 차량 파라미터가
+            # 들어가지 않는다 — 비선형 플랜트에서도 오차 0.02%. 따라서 선형모델 오차를
+            # 목적함수에 두 번째로 들여오지 않는다 (CLAUDE.md 잔차 출처 통제).
+            # v_y, delta 는 참조가 모델 의존(각각 -207%, +2.7% 오차)이라 여기서 제외했다.
             vy, gamma, epsi, ey = xk[0], xk[1], xk[2], xk[3]
+            gamma_ref = p_vx[k] * p_kappa[k]      # 이미 P 에 있는 프리뷰 — 새 파라미터 없음
             J += (cfg_mpc.W_ey * ey**2 + cfg_mpc.W_epsi * epsi**2
-                  + cfg_mpc.W_vy * vy**2 + cfg_mpc.W_gamma * gamma**2
+                  + cfg_mpc.W_vy * vy**2 + cfg_mpc.W_gamma * (gamma - gamma_ref)**2
                   + cfg_mpc.R_delta * uk**2
                   + cfg_mpc.R_ddelta * (uk - u_prev_k)**2)
 
