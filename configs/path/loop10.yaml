@@ -1,0 +1,142 @@
+# 10코너 폐루프 맵 — 합성 경로. 새 실험 설계의 in-distribution 기준 트랙 (2026-07-30).
+#
+# 목적: 기존 racetrack.mat(955.5 m)보다 **2배 이상 길고 곡률 범위가 넓은** 폐루프.
+# 사용자 지시 3건 — ① 곡률 다양, 최소 6코너, 폐루프 ② 총 길이 racetrack 2배 이상
+# ③ 좌회전 5 + 우회전 5.
+#
+# ## 구조적 제약 — 좌회전이 우세할 수밖에 없다
+#
+# 경로가 kappa(s) 하나로 정의되므로 출발점·도착점이 만나려면 총 회전량이 고정된다.
+# 자기교차 없는 단순 폐곡선은 회전접선 정리에 의해 정확히 +360° 다. 따라서
+# **좌 합 − 우 합 = 360°** 이고, 좌우 개수를 5:5 로 맞춰도 크기는 대칭일 수 없다.
+#   좌 5개 합 +620°,  우 5개 합 −260°,  순 회전 +360°
+# 좌우를 교대 배치해 우회전이 net-left 루프 안의 시케인 역할을 하게 했다.
+# (부호 대칭 분포가 필요하면 right_turn.yaml 처럼 별도 형상외삽 축을 만들 것.
+#  in-distribution 맵을 8자형으로 만들면 "GP 가 안 본 영역"을 만들 여지가 줄어든다.)
+#
+# ## 코너 설계 (kappa 부호: + = 좌회전)
+#
+# | 코너            |   R  | 회전각 | kappa    | vx(a_y=4) | gamma_ss | 통과시간 |
+# |-----------------|------|--------|----------|-----------|----------|----------|
+# | c01_L_sweep     | 150m | +110°  | +0.00667 | 24.49 m/s | 0.163    | ~12.6 s  |
+# | c02_R_chic      |  50m |  −40°  | −0.02000 | 14.14 m/s | 0.283    | ~ 3.9 s  |
+# | c03_L_med       |  40m | +130°  | +0.02500 | 12.65 m/s | 0.316    | ~ 8.8 s  |
+# | c04_R_fast      | 180m |  −50°  | −0.00556 | 25.00 m/s | 0.139    | ~ 7.1 s  |
+# | c05_L_long      | 250m |  +90°  | +0.00400 | 25.00 m/s | 0.100    | ~16.5 s  |
+# | c06_R_tight     |  25m |  −90°  | −0.04000 | 10.00 m/s | 0.400    | ~ 5.9 s  |
+# | c07_L_hairpin   |  20m | +180°  | +0.05000 |  8.94 m/s | 0.447    | ~ 9.3 s  |
+# | c08_R_med       |  90m |  −30°  | −0.01111 | 18.97 m/s | 0.211    | ~ 3.5 s  |
+# | c09_L_med2      |  75m | +110°  | +0.01333 | 17.32 m/s | 0.231    | ~ 9.5 s  |
+# | c10_R_kink      | 250m |  −50°  | −0.00400 | 25.00 m/s | 0.100    | ~ 9.5 s  |
+#
+# **왜 헤어핀 회전각을 180° 로 키웠나**: 정상선회 횡가속도는 vx=sqrt(a_y/|kappa|)
+# 때문에 어느 코너에서나 a_y_max 로 같다. 곡률을 다양하게 하는 실제 효과는 횡가속도가
+# 아니라 **작동점 (vx, gamma) 의 분포**다 (gamma_ss = vx*kappa 가 0.100~0.447 rad/s,
+# 4.5배 범위). 초기 설계에서는 잔차가 가장 큰 헤어핀이 랩의 2.4 s 뿐이어서
+# **정보량이 가장 큰 조건에 시간이 가장 적게 가는** 문제가 있었다. 회전각을 늘려
+# 9.3 s 로 맞췄다 (그만큼 c05 를 120°->90° 로 줄여 순 회전 360° 를 유지).
+#
+# ## 각 코너 = [클로소이드 in, 일정곡률, 클로소이드 out] — 계단형 kappa 금지
+#
+# 회전각 theta = k*(La + Lc) (클로소이드 2개가 각각 0.5*k*Lc 기여).
+# 클로소이드 길이 Lc 는 두 기준을 함께 만족시킨다:
+#   (1) 공간: |dkappa/ds| <= 0.0025 1/m^2  (racetrack 실측 0.003 보다 완만)
+#   (2) 시간: Lc >= 20 m -> vx<=25 이므로 전이가 최소 0.8 s. 공간적으로 매끄러워도
+#            전이가 짧으면 조향이 급해지므로 시간 기준을 따로 둔다.
+# 결과적으로 전 코너 Lc = 20 m.
+#
+# ## 직선 배분
+#
+# 직선 비율 26.6% (racetrack 실측 21.7%). 길이·곡률은 크게 바꾸되 직선/코너 성격은
+# 비슷하게 두어 비교 가능성을 남겼다. 직선 길이는 **위치 폐합 조건을 푸는 미지수**다
+# (헤딩 폐합은 직선과 무관 — 직선은 kappa=0 이므로. 두 조건이 분리된다).
+# 10개 미지수 - 3조건(위치 2 + 총길이 1) = 7차원 영공간이 남으므로 배분 정규화를
+# 약하게 걸어 해가 하한에 붙지 않게 했다. 헤어핀(c06/c07) 앞 직선이 길어져
+# 최고속 -> 최저속 전이가 생긴다 — vx 진폭을 최대로 쓴다.
+#
+# ## 검증 — **이 저장소의 Reference 빌더로 로드해 실측** (2026-07-30)
+#
+#   total_length       2277.003 m   (racetrack 955.5 m 의 2.38배)
+#   위치 폐합 오차      |d| = 0.0246 m   (2277 m 대비 11 ppm)
+#   헤딩 폐합 오차      -1.43e-03 deg    (목표 +360°)
+#   kappa 범위          [-0.04000, +0.05000] 1/m  ->  R 20 ~ 250 m
+#   |dkappa/ds| max     0.00250 1/m^2   (계단형 없음. racetrack 실측 0.003)
+#   |dtheta/ds - kappa| 2.81e-05        (자기정합. racetrack 7.5e-4, right_turn 3.44e-4
+#                                        보다 좋다 — 합성 경로이므로 당연)
+#   코너 수             좌 5 / 우 5 = 10  (부호 변화 구간 카운트로 확인)
+#   구성 비율           직선 26.6% / 좌 47.3% / 우 26.1%
+#   a_y=4.0            vx [ 8.94, 25.00] m/s,  1랩 105.3 s
+#   a_y=6.0            vx [10.95, 25.00] m/s,  1랩  99.3 s   (vx_range [5,25] 안)
+#   자기교차           없음 (호길이 60 m 이상 떨어진 점들 사이 최소거리 40.57 m)
+#   외곽 크기          820.7 x 557.9 m
+#
+# 생성 스크립트 자체의 폐합 지표는 0.0007 m / 8.2e-08 deg 였다. 위 값(0.0246 m)과
+# 다른 이유는 **적분 방식 차이**뿐이다 (스크립트는 cos/sin 사다리꼴, 빌더의
+# `reconstruct_xy` 는 자체 구적). 설계 오류가 아니다. 어느 쪽이든 무시할 크기이고,
+# **애초에 폐합 오차는 실험 결과에 영향이 없다** — 추종오차는 오차좌표계에서 계산되고
+# `reconstruct_xy` 는 시각화 전용이다 (sim-experiment.md 경로 표현).
+#
+# **주의 — 1랩 105.3 s 는 racetrack(sim/racetrack.yaml duration 70 s)보다 길다.**
+# `configs/sim/loop10.yaml` (duration 115 s)을 함께 쓰라. duration 이 짧으면 랩을
+# 못 돈다 — `Reference.kappa_of_s` 가 s 를 clamp 하므로 경로 끝을 지나면 조용히
+# 직선이 무한히 이어지고, 그 구간은 잔차가 0 이라 결과를 희석시킨다.
+#
+# 생성 스크립트: 세션 스크래치패드 make_loop10.py (재현하려면 코너 표 + 폐합 솔버).
+# segments 스키마는 single_curve.yaml 과 동일: {length[m], kappa_end[1/m]},
+# 시작 곡률 = 직전 구간의 kappa_end (첫 구간은 0), 구간 내부는 선형(클로소이드).
+
+a_y_max: 4.0             # m/s^2. experiment 의 overrides 로 6.0 등으로 바꾼다.
+kappa_eps: 1.0e-4        # 1/m, 직선 취급 임계 (vx_max 0-division 방어)
+kappa_max: 0.05          # 1/m, 참고용 (R_min = 20 m). 빌더는 쓰지 않는다.
+
+segments:
+  # ---- c01 완만한 고속 좌 (R=150, +110deg) ----
+  - {label: s_c01_L_sweep,     length:  58.021, kappa_end:  0.000000}
+  - {label: c01_L_sweep_in,    length:  20.000, kappa_end:  0.006667}
+  - {label: c01_L_sweep_arc,   length: 267.979, kappa_end:  0.006667}
+  - {label: c01_L_sweep_out,   length:  20.000, kappa_end:  0.000000}
+  # ---- c02 중속 우 시케인 (R=50, -40deg) ----
+  - {label: s_c02_R_chic,      length:  20.000, kappa_end:  0.000000}
+  - {label: c02_R_chic_in,     length:  20.000, kappa_end: -0.020000}
+  - {label: c02_R_chic_arc,    length:  14.907, kappa_end: -0.020000}
+  - {label: c02_R_chic_out,    length:  20.000, kappa_end:  0.000000}
+  # ---- c03 중속 좌 (R=40, +130deg) ----
+  - {label: s_c03_L_med,       length:  20.000, kappa_end:  0.000000}
+  - {label: c03_L_med_in,      length:  20.000, kappa_end:  0.025000}
+  - {label: c03_L_med_arc,     length:  70.757, kappa_end:  0.025000}
+  - {label: c03_L_med_out,     length:  20.000, kappa_end:  0.000000}
+  # ---- c04 고속 완만 우 (R=180, -50deg) ----
+  - {label: s_c04_R_fast,      length:  33.454, kappa_end:  0.000000}
+  - {label: c04_R_fast_in,     length:  20.000, kappa_end: -0.005556}
+  - {label: c04_R_fast_arc,    length: 137.080, kappa_end: -0.005556}
+  - {label: c04_R_fast_out,    length:  20.000, kappa_end:  0.000000}
+  # ---- c05 최대반경 좌, 가장 긴 코너 (R=250, +90deg) ----
+  - {label: s_c05_L_long,      length:  20.000, kappa_end:  0.000000}
+  - {label: c05_L_long_in,     length:  20.000, kappa_end:  0.004000}
+  - {label: c05_L_long_arc,    length: 372.699, kappa_end:  0.004000}
+  - {label: c05_L_long_out,    length:  20.000, kappa_end:  0.000000}
+  # ---- c06 저속 타이트 우 (R=25, -90deg). 앞 직선이 길다 = 감속 구간 ----
+  - {label: s_c06_R_tight,     length: 119.569, kappa_end:  0.000000}
+  - {label: c06_R_tight_in,    length:  20.000, kappa_end: -0.040000}
+  - {label: c06_R_tight_arc,   length:  19.270, kappa_end: -0.040000}
+  - {label: c06_R_tight_out,   length:  20.000, kappa_end:  0.000000}
+  # ---- c07 헤어핀 좌 = 최대곡률·최저속 (R=20, +180deg) ----
+  - {label: s_c07_L_hairpin,   length:  33.971, kappa_end:  0.000000}
+  - {label: c07_L_hairpin_in,  length:  20.000, kappa_end:  0.050000}
+  - {label: c07_L_hairpin_arc, length:  42.832, kappa_end:  0.050000}
+  - {label: c07_L_hairpin_out, length:  20.000, kappa_end:  0.000000}
+  # ---- c08 중속 우 (R=90, -30deg) ----
+  - {label: s_c08_R_med,       length: 120.762, kappa_end:  0.000000}
+  - {label: c08_R_med_in,      length:  20.000, kappa_end: -0.011111}
+  - {label: c08_R_med_arc,     length:  27.124, kappa_end: -0.011111}
+  - {label: c08_R_med_out,     length:  20.000, kappa_end:  0.000000}
+  # ---- c09 중속 좌 (R=75, +110deg). 앞 직선이 최장 = 메인 스트레이트 ----
+  - {label: s_c09_L_med2,      length: 156.422, kappa_end:  0.000000}
+  - {label: c09_L_med2_in,     length:  20.000, kappa_end:  0.013333}
+  - {label: c09_L_med2_arc,    length: 123.990, kappa_end:  0.013333}
+  - {label: c09_L_med2_out,    length:  20.000, kappa_end:  0.000000}
+  # ---- c10 최대반경 우, 결승선으로 복귀 (R=250, -50deg) ----
+  - {label: s_c10_R_kink,      length:  20.000, kappa_end:  0.000000}
+  - {label: c10_R_kink_in,     length:  20.000, kappa_end: -0.004000}
+  - {label: c10_R_kink_arc,    length: 198.166, kappa_end: -0.004000}
+  - {label: c10_R_kink_out,    length:  20.000, kappa_end:  0.000000}

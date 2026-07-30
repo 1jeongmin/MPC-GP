@@ -1,0 +1,21 @@
+# loop10 맵용 시뮬레이션 타이밍 (2026-07-30).
+#
+# racetrack.yaml 과 **duration 만 다르다.** dt_plant / dt_ctrl / seed 는 동일하게 두어
+# 케이스·시나리오 간 통제를 유지한다 (sim-experiment.md 「통제해야 할 변수」).
+#
+# duration 근거: loop10 은 총 2277.003 m 이고 1랩 소요가
+#   a_y=4.0 -> 105.3 s,  a_y=6.0 -> 99.3 s   (Reference 로 실측)
+# 이다. 가장 느린 a_y=4.0 기준에 약 9% 여유를 더해 115 s 로 잡았다.
+#
+# **duration 을 줄이지 마라.** Reference.kappa_of_s 는 s 를 [0, total_length] 로
+# clamp 하므로 랩을 다 돌지 못하면 경고 없이 도중에 끝나고, 반대로 지나치게 길면
+# 경로 끝의 직선(kappa=0)이 무한히 이어져 잔차 0 구간이 결과를 희석시킨다.
+#
+# 비용 메모: 115 s / dt_ctrl 0.02 = 5750 제어스텝. N=60 에서 solve 가 스텝당 약
+# 14 ms 였으므로(part1_mpc_only_ay4 실측) 런당 solve 시간만 대략 80 s 다.
+# racetrack(70 s, 3500스텝)보다 1.6배 걸린다.
+
+dt_plant: 0.01   # s,  플랜트 적분 스텝 (100 Hz)
+dt_ctrl: 0.02    # s,  제어 스텝 (50 Hz). dt_ctrl / dt_plant = 2
+duration: 115.0  # s,  한 바퀴(최대 105.3 s) + 여유
+seed: 0          # 난수 seed (default/racetrack 와 동일 — 케이스 간 통제)
