@@ -1,0 +1,13 @@
+# Part 1 / 케이스 1 = 학습맵 + a_y 그대로 (in-distribution 진단) / GP 잔차 보정 — **커널 입력 비교: delta 이력 2개**.
+#
+# 기준선 `part1_gp_lpf_ay4.yaml`(gp: loop10, 3D)과 **gp 그룹 하나만 다르다.**
+# 나머지는 전부 동일 — 커널 입력의 효과만 분리하기 위한 통제
+# (sim-experiment.md 「통제해야 할 변수」). 근거는 `configs/gp/loop10_dlag2.yaml`.
+vehicle: sedan
+sim: loop10
+path: loop10
+mpc: default
+gp: loop10_dlag2
+plant: nonlinear
+sensor: realistic
+state_kf: default

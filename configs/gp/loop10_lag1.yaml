@@ -1,0 +1,41 @@
+# loop10 학습 GP — **지연 특징 1개** (현재 + 직전 시점). 비교 케이스 A.
+#
+# 사용자 지시(2026-08-01)로 만든 커널 입력 비교축이다. 기준선은 loop10.yaml(n_lags: 0).
+# 세 config 는 **n_lags 만 다르다** — M·하이퍼파라미터 초기값·sigma_n_floor·학습 출처가
+# 전부 같아야 커널 입력의 효과만 분리해서 볼 수 있다. 하나라도 같이 바꾸지 마라.
+#
+# ## 특징 구성 (src/gp/dataset.py apply_lags)
+#
+#   b_k = [v_y_k, gamma_k, delta_{k-1}]        (기본 3D — 배포가 solve 전에 아는 값)
+#   z_k = [b_k, b_{k-1}]                       (6D)
+#
+# 없는 과거(k=0)는 0 으로 채운다. 배포(mpc_gp.GPStepModel)도 같은 규약이고, runner 가
+# x=0, u_prev=0 에서 출발하므로 0 패딩이 실제 초기조건과도 일치한다.
+#
+# ## 왜 지연을 넣나 / 무엇을 감수하나
+#
+# 넣는 이유: 현재 z 하나로는 설명 안 되는 잔차 성분(타이어 이완, 상태추정 지연 등)이
+# 지금은 전부 "잡음"(sigma_n)으로 흡수된다. 과거를 주면 그중 일부가 **설명 가능한
+# 신호**로 옮겨가 예측분산이 실제 산포에 가까워질 수 있다 — 폐루프 과신(z_std≈2.2)의
+# 후보 원인 중 하나다.
+#
+# ★ 감수하는 것: gp-residual.md 「입력」이 **차원 최소 유지가 설계 목표**라고 못박고
+# 있다. 3D -> 6D 는 같은 커버리지에 필요한 데이터를 급증시키고, "데이터 희소 영역에서
+# 사후분산이 넓어진다"는 논문의 핵심 UQ 논증을 약하게 만든다. 그래서 이건 **기본값이
+# 아니라 비교 케이스**이고, 기준선(n_lags: 0)과 나란히 보고해야 한다.
+n_lags: 1
+lag_mode: full           # 상태·입력을 통째로 지연. 입력 이력만 원하면 loop10_dlag1.yaml.
+
+# --- 아래는 loop10.yaml 과 동일해야 한다 (비교 통제) ---
+M: 2000                  # 딕셔너리 크기. 근거는 loop10.yaml 의 M 스윕 표.
+init_lengthscale: 1.0
+init_sigma_f: 1.0
+init_sigma_n: 0.1
+sigma_n_floor: 1.0e-2    # 정칙화. 커버리지 맞추려고 만지지 마라.
+jitter: 1.0e-8
+
+train_experiment: gp_train_loop10
+
+tuning_method: type2_ml (n_lags 는 튜닝하지 않고 사용자 지정 비교축)
+tuning_budget_closed_loop_evals: 0
+tuning_selection_scenario: part1_gp_lpf_ay4_lag1   # in-distribution 진단용

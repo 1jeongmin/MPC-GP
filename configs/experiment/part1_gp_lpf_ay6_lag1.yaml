@@ -1,0 +1,20 @@
+# Part 1 / 케이스 2 = 학습맵(loop10) + 가속도 증가(a_y=6). 강도 외삽 / GP 잔차 보정 — **커널 입력 비교 케이스 lag1**.
+#
+# 기준선 `part1_gp_lpf_ay6.yaml`(gp: loop10, n_lags=0)과 **gp 그룹 하나만 다르다.**
+# vehicle/sim/path/mpc/plant/sensor/state_kf/seed/overrides 는 전부 동일하다 —
+# 커널 입력 차원의 효과만 분리해서 보기 위한 통제다
+# (sim-experiment.md 「통제해야 할 변수」). 다른 것을 같이 바꾸면 비교가 깨진다.
+#
+# 특징: z_k = [b_k, ..., b_{k-1}], b_k = [v_y_k, gamma_k, delta_{k-1}] -> 6D.
+# 근거·감수사항(차원 증가가 UQ 논증을 약하게 만든다)은 `configs/gp/loop10_lag1.yaml`
+# 에 있다. 여기에 복제하지 않는다.
+vehicle: sedan
+sim: loop10
+path: loop10
+mpc: default
+gp: loop10_lag1
+plant: nonlinear
+sensor: realistic
+state_kf: default
+overrides:
+  path.a_y_max: 6.0

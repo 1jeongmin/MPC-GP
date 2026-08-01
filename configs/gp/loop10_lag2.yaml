@@ -1,0 +1,27 @@
+# loop10 학습 GP — **지연 특징 2개** (현재 + 직전 + 전전). 비교 케이스 B.
+#
+# 사용자 지시(2026-08-01) 커널 입력 비교축. 근거·감수사항은 loop10_lag1.yaml 참조
+# (여기 복제하지 않는다). 기준선은 loop10.yaml(n_lags: 0), 케이스 A 는 loop10_lag1.yaml.
+#
+#   b_k = [v_y_k, gamma_k, delta_{k-1}]
+#   z_k = [b_k, b_{k-1}, b_{k-2}]              (9D)
+#
+# ★ 9D 는 3D 대비 차원이 3배다. gp-residual.md 「차원 최소 유지가 설계 목표」에서
+# 가장 멀리 나간 지점이므로, 캘리브레이션이 좋아지더라도 **사후분산이 넓어지는 UQ
+# 논증이 함께 약해지지 않았는지**를 반드시 같이 봐라 (불확실성 지도 gp_var 확인).
+n_lags: 2
+lag_mode: full           # 상태·입력을 통째로 지연. 입력 이력만 원하면 loop10_dlag2.yaml.
+
+# --- 아래는 loop10.yaml 과 동일해야 한다 (비교 통제) ---
+M: 2000
+init_lengthscale: 1.0
+init_sigma_f: 1.0
+init_sigma_n: 0.1
+sigma_n_floor: 1.0e-2
+jitter: 1.0e-8
+
+train_experiment: gp_train_loop10
+
+tuning_method: type2_ml (n_lags 는 튜닝하지 않고 사용자 지정 비교축)
+tuning_budget_closed_loop_evals: 0
+tuning_selection_scenario: part1_gp_lpf_ay4_lag2

@@ -1,0 +1,28 @@
+# loop10 학습 GP — **입력 이력만 1개** (delta 지연). 비교 케이스 C.
+#
+# 사용자가 말한 "delta_k, delta_k-1, delta_k-2 로 차원 늘리기"에 해당하는 구성이다.
+# 인덱스가 한 칸 밀린 이유: 배포는 solve **전에** GP 를 평가하므로 delta_k 를 알 수
+# 없다. 쓸 수 있는 가장 최신 입력이 delta_(k-1) 이다 (mpc_gp.set_operating_point).
+#
+#   z_k = [v_y_k, gamma_k, delta_(k-1), delta_(k-2)]   -> 4D
+#
+# `loop10_lag1.yaml`(lag_mode: full, 6D)과의 차이: 상태(v_y, gamma)는 **현재만**
+# 쓰고 입력만 과거를 준다. 잔차를 설명하는 이력이 상태 쪽인지 입력 쪽인지 가르는
+# 대조군이며, 차원이 훨씬 덜 늘어 gp-residual.md 「차원 최소 유지」와 덜 충돌한다.
+# 같은 효과가 나오면 full 보다 이쪽이 낫다.
+n_lags: 1
+lag_mode: delta
+
+# --- 아래는 loop10.yaml 과 동일해야 한다 (비교 통제) ---
+M: 2000
+init_lengthscale: 1.0
+init_sigma_f: 1.0
+init_sigma_n: 0.1
+sigma_n_floor: 1.0e-2
+jitter: 1.0e-8
+
+train_experiment: gp_train_loop10
+
+tuning_method: type2_ml (지연 구성은 튜닝하지 않고 사용자 지정 비교축)
+tuning_budget_closed_loop_evals: 0
+tuning_selection_scenario: part1_gp_lpf_ay4_dlag1
