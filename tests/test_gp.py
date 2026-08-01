@@ -20,8 +20,10 @@ from src.control.mpc_gp import make_gp_mpc
 from src.control.mpc_kf import make_kf_mpc
 from src.control.mpc_nominal import NominalStepModel, make_nominal_mpc
 from src.estimation.ekf import make_augmented_kf
+from src.control.mpc_gp import GPStepModel
 from src.gp.casadi_export import build_mu_function, gp_param_vector
-from src.gp.dataset import collect_residual_data
+from src.gp.dataset import (BASE_DIM, ResidualDataset, apply_lags, collect_residual_data,
+                            lagged_dim, lap_block_split)
 from src.gp.train_offline import load_gp, save_gp, train
 from src.models.nonlinear_bicycle import make_nonlinear_rhs_np
 from src.path.reference import Reference
@@ -161,3 +163,91 @@ def test_correctors_beat_nominal(sedan, trained) -> None:
     # 순위는 단언하지 않고 기록만 한다 (docstring 참조).
     print(f"\n[보정기 비교] only={e_only:.3e} kf={e_kf:.3e} gp={e_gp:.3e} "
           f"(GP-KF {100*(e_gp-e_kf)/e_kf:+.1f}%)")
+
+
+# --------------------------------------------------------------------------- #
+# 학습/배포 특징 정합 (2026-08-01) — 두 경로가 갈라지면 GP 가 다른 질문에 답한다   #
+# --------------------------------------------------------------------------- #
+def test_apply_lags_shift_and_padding() -> None:
+    """지연 블록은 정확히 한 스텝씩 밀리고, 없는 과거는 0 이어야 한다 (full 모드)."""
+    Z = np.arange(15, dtype=float).reshape(5, BASE_DIM)      # 5스텝 x 3특징
+    R = np.zeros((5, 2))
+    lagged = apply_lags(ResidualDataset(Z.copy(), R), n_lags=2)
+
+    assert lagged.Z.shape == (5, 9)
+    assert np.allclose(lagged.Z[:, 0:3], Z)                   # 현재 시점은 그대로
+    assert np.allclose(lagged.Z[0, 3:], 0.0)                  # k=0 은 과거가 없다
+    assert np.allclose(lagged.Z[1, 3:6], Z[0]) and np.allclose(lagged.Z[1, 6:9], 0.0)
+    assert np.allclose(lagged.Z[3, 3:6], Z[2]) and np.allclose(lagged.Z[3, 6:9], Z[1])
+    assert apply_lags(ResidualDataset(Z.copy(), R), n_lags=0).Z.shape == (5, 3)
+
+
+def test_apply_lags_delta_mode() -> None:
+    """delta 모드는 **입력 이력만** 붙인다 -> 차원 3+L, 상태는 현재만."""
+    Z = np.arange(15, dtype=float).reshape(5, BASE_DIM)
+    lagged = apply_lags(ResidualDataset(Z.copy(), np.zeros((5, 2))), 2, lag_mode="delta")
+
+    assert lagged.Z.shape == (5, 5)                           # 3 + 2
+    assert np.allclose(lagged.Z[:, 0:3], Z)
+    assert np.allclose(lagged.Z[0, 3:], 0.0)
+    assert lagged.Z[3, 3] == Z[2, 2] and lagged.Z[3, 4] == Z[1, 2]   # delta 만 따라온다
+    assert lagged.Z[1, 3] == Z[0, 2] and lagged.Z[1, 4] == 0.0
+
+
+def test_lap_block_split_ignores_partial_lap() -> None:
+    """★ 회귀: 주행이 목표를 조금 넘겨 끝나면 그 꼬리를 '한 바퀴 더'로 세면 안 된다.
+
+    `run_closed_loop` 은 `s > L*n_laps + stop_margin` 에서 멈추므로 항상 몇 미터
+    넘겨서 끝난다. 그 조각을 바퀴로 세면 홀드아웃이 마지막 몇 점만 남아 캘리브레이션
+    수치가 통째로 무의미해진다 (2026-08-01 에 실제로 그 버그를 냈다 — 홀드아웃이
+    5,265점이어야 하는데 10점이었고 z_std 가 0.08 로 나왔다).
+    """
+    L, n = 100.0, 3
+    s = np.concatenate([np.linspace(0, L * n, 300, endpoint=False), [L * n + 4.7]])
+    ds = ResidualDataset(np.zeros((len(s), BASE_DIM)), np.zeros((len(s), 2)), s=s)
+    fit, held = lap_block_split(ds, L, n_holdout_laps=1)
+
+    assert len(held) == 100, f"홀드아웃이 마지막 한 바퀴 전체여야 한다 (got {len(held)})"
+    assert len(fit) == 200
+    assert held.s.min() >= 2 * L and held.s.max() < n * L      # 꼬리 조각 제외
+
+
+def test_apply_lags_rejects_subsampled() -> None:
+    """솎아낸 데이터에 지연을 붙이면 '직전 스텝'이 수십 스텝 전이 된다 — 막아야 한다."""
+    ds = ResidualDataset(np.zeros((100, BASE_DIM)), np.zeros((100, 2)))
+    with pytest.raises(ValueError, match="시간순 연속"):
+        apply_lags(ds.subsample(10), n_lags=1)
+
+
+@pytest.mark.parametrize("n_lags,lag_mode", [(0, "full"), (1, "full"), (2, "full"),
+                                             (1, "delta"), (2, "delta")])
+def test_train_deploy_feature_match(sedan, gp_cfg, n_lags: int, lag_mode: str) -> None:
+    """배포가 만드는 z 와 학습이 쓴 z 가 **스텝마다 정확히 같아야** 한다.
+
+    학습은 `collect_residual_data` + `apply_lags`(0 패딩)로 특징을 만들고, 배포는
+    `GPStepModel` 이 이력 버퍼로 만든다. 두 구현이 갈라지면 GP 는 학습한 것과 다른
+    질문을 받게 되는데, 그건 조용히 캘리브레이션만 망가뜨려서 알아채기 어렵다
+    (2026-08-01 에 delta 시점이 정확히 그렇게 어긋나 있었다). 그래서 여기서 묶는다.
+
+    평균까지 대조하므로 지연 특징(d>3)에서의 numpy<->CasADi 일치(게이트 7)도 함께 본다.
+    """
+    mpc = load_group("mpc", "default")
+    sim = replace(load_group("sim", "default"), duration=3.0)
+    path = load_group("path", "single_curve")
+    ds = collect_residual_data(sedan, mpc, sim, path, plant="nonlinear")
+    gp = train(ds, replace(gp_cfg, n_lags=n_lags, lag_mode=lag_mode, M=30))
+
+    assert gp.input_dim == lagged_dim(n_lags, lag_mode), "학습된 GP 의 입력차원이 규약과 다르다"
+    expected = apply_lags(ds, n_lags, lag_mode).Z
+    model = GPStepModel(sedan, sim.dt_ctrl, gp)
+
+    # 배포와 **같은 순서로** 스텝을 재생해야 이력 버퍼가 같은 상태를 지난다.
+    for k in range(len(ds)):
+        x0 = np.array([ds.Z[k, 0], ds.Z[k, 1], 0.0, 0.0])     # v_y, gamma 만 쓰인다
+        model.set_operating_point(x0, float(ds.Z[k, 2]))      # u_prev = delta_{k-1}
+        if k % 11:                                            # 전 스텝 대조는 느리다
+            continue
+        mu_expected = gp.predict_mean(expected[k])[0]
+        assert np.allclose(model.extra_param_values(), mu_expected, atol=1e-10), (
+            f"스텝 {k} 에서 배포 z 가 학습 z 와 다르다 "
+            f"(n_lags={n_lags}, lag_mode={lag_mode})")

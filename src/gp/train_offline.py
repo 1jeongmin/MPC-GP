@@ -17,7 +17,7 @@ import numpy as np
 from scipy.optimize import minimize
 
 from src.config import GpConfig
-from src.gp.dataset import ResidualDataset, Standardizer
+from src.gp.dataset import ResidualDataset, Standardizer, apply_lags
 from src.gp.kernels import ard_rbf_np
 
 
@@ -81,19 +81,46 @@ def _nlml(theta_log: np.ndarray, Zs: np.ndarray, y: np.ndarray, jitter: float) -
 
 
 def _fit_channel(Zs: np.ndarray, y: np.ndarray, cfg: GpConfig) -> GpChannel:
-    """단일 채널 Type-II ML 학습.
+    """단일 채널 Type-II ML 학습 (**다중 재시작** — NLML 이 가장 낮은 해를 채택).
 
     sigma_n 에 하한(sigma_n_floor)을 둔다 — 없으면 sigma_n->0 으로 보간 과적합이
     일어나 학습 궤적 밖(배포 분포)에서 진동한다 (Phase 7 진단으로 확인).
+
+    ## 왜 재시작이 필요한가 (2026-08-01 측정으로 확인)
+
+    NLML 은 비볼록이고, 이 문제에는 **"전부 잡음"으로 붕괴하는 국소최적**이 있다:
+    lengthscale 이 전부 하한(1e-3), sigma_f -> 0, sigma_n -> 1(표준화 단위에서 타깃
+    산포 전체) 로 가서 "예측할 수 없다"고 답하는 해다. 단일 시작점(init_lengthscale
+    = 1.0, 종전 기본값)은 gamma 채널에서 실제로 여기 빠졌다:
+
+        init_ls 0.1 / 0.3 -> NLML  1376.5  (sigma_f 5.71, sigma_n 0.452, ls~[1.9,0.9,0.9])
+        init_ls 1.0 / 3.0 -> NLML  2837.9  (sigma_f 0.001, sigma_n 1.000, ls 전부 하한)
+
+    NLML 차이가 1461 이라 근소한 차이가 아니다 — 완전히 다른 모델이다. 붕괴한 해는
+    GP 평균이 ~0 이 되어 잔차 보정을 사실상 포기하고, 그 상태로 캘리브레이션을 재면
+    "특징이 나쁘다"는 잘못된 결론이 나온다. 2026-07-30 에 "gamma lengthscale 이 하한
+    근처인데 버그인지 데이터 특성인지 미판단"으로 남겼던 것이 바로 이 현상이다.
+
+    `init_lengthscale` 은 재시작 후보에 **함께** 들어간다(사용자 지정값을 버리지
+    않는다). 비용은 후보 수에 비례한다.
     """
     d = Zs.shape[1]
     sn0 = max(cfg.init_sigma_n, cfg.sigma_n_floor)
-    theta0 = np.log(np.concatenate([np.full(d, cfg.init_lengthscale), [cfg.init_sigma_f, sn0]]))
     # bounds: lengthscale·sigma_f 는 넉넉히, sigma_n 은 floor 이상.
     bounds = [(np.log(1e-3), np.log(1e3))] * d + [(np.log(1e-3), np.log(1e3))] \
         + [(np.log(cfg.sigma_n_floor), np.log(1e2))]
-    res = minimize(_nlml, theta0, args=(Zs, y, cfg.jitter), method="L-BFGS-B", bounds=bounds)
-    theta = res.x
+
+    inits = sorted({float(cfg.init_lengthscale), *cfg.init_lengthscale_restarts})
+    best, best_nlml = None, np.inf
+    for init_ls in inits:
+        theta0 = np.log(np.concatenate([np.full(d, init_ls),
+                                        [cfg.init_sigma_f, sn0]]))
+        res = minimize(_nlml, theta0, args=(Zs, y, cfg.jitter),
+                       method="L-BFGS-B", bounds=bounds)
+        if res.fun < best_nlml:
+            best, best_nlml = res.x, float(res.fun)
+    theta = best
+
     ls = np.exp(theta[:d]); sf = float(np.exp(theta[d])); sn = float(np.exp(theta[d + 1]))
     K = ard_rbf_np(Zs, Zs, ls, sf) + (sn**2 + cfg.jitter) * np.eye(len(y))
     W = np.linalg.inv(K)
@@ -103,10 +130,22 @@ def _fit_channel(Zs: np.ndarray, y: np.ndarray, cfg: GpConfig) -> GpChannel:
 
 @dataclass
 class TwoChannelGP:
-    """v_y, gamma 두 채널 GP + 입력·타깃 표준화. 실단위 예측 제공."""
+    """v_y, gamma 두 채널 GP + 입력·타깃 표준화. 실단위 예측 제공.
+
+    n_lags / lag_mode: 학습에 쓴 지연 규약. 배포(`mpc_gp.GPStepModel`)가 **같은
+    규약으로** 특징을 만들려면 알아야 하므로 모델과 함께 저장한다 — 표준화 통계를
+    함께 저장하는 것과 같은 이유다(`gp-residual.md` 「저장하지 않으면 재현이 깨진다」).
+    """
     z_scaler: Standardizer
     r_scaler: Standardizer
     channels: list[GpChannel]   # [v_y, gamma]
+    n_lags: int = 0
+    lag_mode: str = "full"
+
+    @property
+    def input_dim(self) -> int:
+        """특징 z 의 차원 = 3 * (n_lags + 1). 딕셔너리에서 직접 읽는다."""
+        return int(self.channels[0].Z.shape[1])
 
     def predict_mean(self, z: np.ndarray) -> np.ndarray:
         """실단위 잔차 평균 예측. z:(n,3) -> (n,2)."""
@@ -137,14 +176,19 @@ def train(dataset: ResidualDataset, cfg: GpConfig) -> TwoChannelGP:
     """데이터셋으로 2채널 exact GP 를 학습한다.
 
     딕셔너리는 M개 균일 subsample. 입력·타깃 표준화 후 채널별 Type-II ML.
+
+    `cfg.n_lags > 0` 이면 **solve 전에** 지연 특징을 붙인다 — subsample 뒤에 붙이면
+    "직전 스텝"이 실제로는 수십 스텝 전이 되므로 순서가 중요하다(`apply_lags` 참조).
     """
+    dataset = apply_lags(dataset, cfg.n_lags, cfg.lag_mode)
     dict_ds = dataset.subsample(cfg.M)
     z_scaler = Standardizer.fit(dict_ds.Z)
     r_scaler = Standardizer.fit(dict_ds.R)
     Zs = z_scaler.transform(dict_ds.Z)
     Rs = r_scaler.transform(dict_ds.R)
     channels = [_fit_channel(Zs, Rs[:, j], cfg) for j in range(Rs.shape[1])]
-    return TwoChannelGP(z_scaler=z_scaler, r_scaler=r_scaler, channels=channels)
+    return TwoChannelGP(z_scaler=z_scaler, r_scaler=r_scaler, channels=channels,
+                        n_lags=cfg.n_lags, lag_mode=cfg.lag_mode)
 
 
 def save_gp(path: Path, gp: TwoChannelGP) -> Path:
@@ -158,7 +202,8 @@ def save_gp(path: Path, gp: TwoChannelGP) -> Path:
         d[f"Z{j}"] = ch.Z; d[f"ls{j}"] = ch.lengthscales
         d[f"sf{j}"] = ch.sigma_f; d[f"sn{j}"] = ch.sigma_n
         d[f"alpha{j}"] = ch.alpha; d[f"W{j}"] = ch.W
-    np.savez(path, n_channels=len(gp.channels), **d)
+    np.savez(path, n_channels=len(gp.channels), n_lags=gp.n_lags,
+             lag_mode=gp.lag_mode, **d)
     return path
 
 
@@ -171,4 +216,8 @@ def load_gp(path: Path) -> TwoChannelGP:
         channels.append(GpChannel(Z=d[f"Z{j}"], lengthscales=d[f"ls{j}"],
                                   sigma_f=float(d[f"sf{j}"]), sigma_n=float(d[f"sn{j}"]),
                                   alpha=d[f"alpha{j}"], W=d[f"W{j}"]))
-    return TwoChannelGP(z_scaler=zc, r_scaler=rc, channels=channels)
+    # n_lags/lag_mode 는 이 필드가 생기기 전(2026-08-01) 저장본에 없다 -> 기본값 (하위호환).
+    n_lags = int(d["n_lags"]) if "n_lags" in d.files else 0
+    lag_mode = str(d["lag_mode"]) if "lag_mode" in d.files else "full"
+    return TwoChannelGP(z_scaler=zc, r_scaler=rc, channels=channels,
+                        n_lags=n_lags, lag_mode=lag_mode)

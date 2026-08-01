@@ -6,9 +6,14 @@ Z/alpha/lengthscale/sigma_f/표준화통계를 CasADi **파라미터**로 주입
 
 **numpy GP 예측과 CasADi 예측이 일치하는지 대조는 필수** (게이트 7).
 
-파라미터 평탄화 레이아웃 (M = 딕셔너리 크기, 채널 2, 입력차원 d=3):
+파라미터 평탄화 레이아웃 (M = 딕셔너리 크기, 채널 2, 입력차원 d):
   Z(M*d) | alpha(M*2) | ls(2*d) | sf(2) | z_mean(d) | z_scale(d) | r_mean(2) | r_scale(2)
 행렬은 order='F'(열우선) 로 평탄화 — CasADi ca.reshape(열우선)과 일치시키기 위함.
+
+**입력차원 d 는 고정이 아니다** (2026-08-01): 기본 3 `[v_y, gamma, delta_prev]` 이지만
+지연 특징(`GpConfig.n_lags`)을 쓰면 `3*(n_lags+1)` 이 된다. d 를 모듈 상수로 두면
+lag 케이스에서 파라미터 레이아웃이 조용히 어긋나므로 **호출자가 넘기게** 한다
+(값의 단일 출처는 `TwoChannelGP.input_dim`).
 """
 from __future__ import annotations
 
@@ -18,13 +23,13 @@ import numpy as np
 from src.gp.kernels import ard_rbf_ca
 from src.gp.train_offline import TwoChannelGP
 
-D = 3            # 입력 차원 [v_y, gamma, delta]
+D_BASE = 3       # 지연 없을 때의 입력 차원 [v_y, gamma, delta_prev]
 N_CH = 2         # 채널 [v_y, gamma]
 
 
-def gp_extra_dim(M: int) -> int:
-    """평탄화 파라미터 벡터 길이."""
-    return M * D + M * N_CH + N_CH * D + N_CH + D + D + N_CH + N_CH
+def gp_extra_dim(M: int, d: int = D_BASE) -> int:
+    """평탄화 파라미터 벡터 길이. d = 입력 차원(지연 포함)."""
+    return M * d + M * N_CH + N_CH * d + N_CH + d + d + N_CH + N_CH
 
 
 def gp_param_vector(gp: TwoChannelGP) -> np.ndarray:
@@ -40,22 +45,22 @@ def gp_param_vector(gp: TwoChannelGP) -> np.ndarray:
     ])
 
 
-def mu_ca_expr(z, p, M: int):
+def mu_ca_expr(z, p, M: int, d: int = D_BASE):
     """CasADi 심볼릭 GP 평균 mu(z) (실단위, 2채널). z:(d,) 심볼, p:(extra_dim,) 파라미터.
 
     B_d 주입 전의 잔차 평균 [mu_vy, mu_gamma] 를 반환한다 (2,1).
     """
     o = 0
-    Z = ca.reshape(p[o:o + M * D], M, D); o += M * D
+    Z = ca.reshape(p[o:o + M * d], M, d); o += M * d
     alpha = ca.reshape(p[o:o + M * N_CH], M, N_CH); o += M * N_CH
-    ls = ca.reshape(p[o:o + N_CH * D], N_CH, D); o += N_CH * D
+    ls = ca.reshape(p[o:o + N_CH * d], N_CH, d); o += N_CH * d
     sf = p[o:o + N_CH]; o += N_CH
-    z_mean = p[o:o + D]; o += D
-    z_scale = p[o:o + D]; o += D
+    z_mean = p[o:o + d]; o += d
+    z_scale = p[o:o + d]; o += d
     r_mean = p[o:o + N_CH]; o += N_CH
     r_scale = p[o:o + N_CH]; o += N_CH
 
-    z_std = (ca.reshape(z, D, 1) - z_mean) / z_scale        # (d,1)
+    z_std = (ca.reshape(z, d, 1) - z_mean) / z_scale        # (d,1)
     mus = []
     for j in range(N_CH):
         k = ard_rbf_ca(z_std, Z, ls[j, :], sf[j])           # (M,1)
@@ -64,8 +69,8 @@ def mu_ca_expr(z, p, M: int):
     return mu_std * r_scale + r_mean                        # 역표준화 (2,1)
 
 
-def build_mu_function(M: int) -> ca.Function:
+def build_mu_function(M: int, d: int = D_BASE) -> ca.Function:
     """대조·디버그용 ca.Function([z, p], [mu]) (실단위 2채널 평균)."""
-    z = ca.SX.sym("z", D)
-    p = ca.SX.sym("p", gp_extra_dim(M))
-    return ca.Function("gp_mu", [z, p], [mu_ca_expr(z, p, M)])
+    z = ca.SX.sym("z", d)
+    p = ca.SX.sym("p", gp_extra_dim(M, d))
+    return ca.Function("gp_mu", [z, p], [mu_ca_expr(z, p, M, d)])

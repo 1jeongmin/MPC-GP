@@ -124,6 +124,11 @@ def run_closed_loop(
             t=k * dt, x=x.copy(), x_meas=np.asarray(x_meas, float).copy(),
             x_fb=np.asarray(x_fb, float).copy(),   # 제어기가 실제로 받은 상태
             delta=u, vx=vx_now, kappa=kappa_now, s=s,
+            # delta_prev = 이번 solve 에 **실제로 넘긴** 직전 입력. GP 특징 z 의 3번째
+            # 성분이 바로 이 값이다 (`mpc_gp.set_operating_point(x_fb, u_prev)`) —
+            # solve 전이라 delta_k 는 아직 존재하지 않는다. 학습이 delta_k 로 짝지으면
+            # 배포와 다른 특징을 배우게 되므로 runner 가 이 값을 명시적으로 남긴다.
+            delta_prev=u_prev,
             solve_time=info.solve_time, ipopt_iter=info.iterations,
             converged=info.converged, fallback=info.fallback_used,
             residual=residual,

@@ -33,6 +33,16 @@ from src.path.reference import Reference
 ROOT = Path(__file__).resolve().parents[2]
 GP_DISK_CACHE_DIR = ROOT / "data" / "gp_cache"
 
+# GP 학습 특징의 **코드상** 규약 식별자. 디스크 캐시 해시에 들어간다.
+# 특징 정의를 바꿀 때마다 올려라 — 안 올리면 config 가 같다는 이유로 옛 캐시가
+# 조용히 재사용된다 (`_gp_disk_cache_path` 참조).
+#   v1: z=[v_y, gamma, delta_k]      (참값 x 기준 -> 이후 x_fb 로 교체)
+#   v2: z=[v_y, gamma, delta_{k-1}]  (2026-08-01, 배포와 정합 + n_lags 지원)
+#   v3: 학습 절차 변경 — Type-II ML 다중 재시작 (2026-08-01, 국소최적 붕괴 수정)
+# (production 캐시는 GpConfig 전체를 해시하므로 재시작 후보 필드가 생긴 것만으로도
+#  자동 무효화된다. 이 상수는 config 를 안 거치는 스크립트 캐시용이다.)
+FEATURE_SPEC = "z_xfb_delta_prev_lagged_v3_mlrestart"
+
 # plant 키 -> 연속 우변 팩토리. 새 플랜트는 여기에만 추가한다.
 _PLANT_FACTORIES: dict[str, Callable] = {
     "linear": make_rhs_np,
@@ -103,6 +113,10 @@ def _gp_disk_cache_path(exp: ExperimentConfig, tr: ExperimentConfig) -> Path:
     학습 config(경로·차량·MPC·플랜트)나 GpConfig 하이퍼파라미터가 하나라도 바뀌면
     다른 해시가 나와 자동으로 재학습된다 — 오래된 캐시를 몰래 재사용하는 사고를
     구조적으로 막는다(수동으로 캐시를 무효화할 필요가 없다).
+
+    **`FEATURE_SPEC` 도 해시에 넣는다**: config 가 그대로여도 **코드**가 특징 정의를
+    바꾸면(예: 2026-08-01 의 delta_k -> delta_{k-1} 정합) 옛 캐시는 무효다. config 만
+    해시하면 그 변경이 조용히 무시되므로, 특징 규약을 바꿀 때 이 문자열을 함께 올려라.
     """
     import hashlib
     import json
@@ -112,6 +126,7 @@ def _gp_disk_cache_path(exp: ExperimentConfig, tr: ExperimentConfig) -> Path:
         "train_experiment": exp.gp.train_experiment,
         "train_snapshot": tr.to_snapshot(),
         "gp_config": asdict(exp.gp),
+        "feature_spec": FEATURE_SPEC,
     }
     digest = hashlib.sha256(
         json.dumps(payload, sort_keys=True, default=str).encode()

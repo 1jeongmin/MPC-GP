@@ -528,8 +528,15 @@ class SensorConfig:
 class GpConfig:
     """offline GP 설정 (.claude/rules/gp-residual.md).
 
-    입력 z=[v_y,gamma,delta] (3D), 채널 v_y·gamma 독립 2개, ARD RBF, Type-II ML.
+    입력 z=[v_y,gamma,delta_prev] (기본 3D), 채널 v_y·gamma 독립 2개, ARD RBF, Type-II ML.
     M: 딕셔너리 크기(고정). 초기 하이퍼파라미터는 표준화 공간 기준.
+
+    n_lags: 특징에 붙일 **과거 시점 개수**. 0 = 현재만(3D, 기본).
+    lag_mode: "full" = 상태·입력을 통째로 지연(3*(L+1) 차원), "delta" = 입력 이력만
+    붙임(3+L 차원). 구성은 `src.gp.dataset.apply_lags` 참조.
+    ★ 차원을 늘리면 같은 커버리지에 필요한 데이터가 급증하고 "데이터 희소 영역에서
+    사후분산이 넓어진다"는 UQ 논증이 약해진다(`gp-residual.md` 「입력」). 사용자 지시
+    (2026-08-01)로 lag 1/2 를 **비교 케이스로** 추가한 것이며 기본값은 0 이다.
     """
     M: int
     init_lengthscale: float = 1.0
@@ -537,6 +544,12 @@ class GpConfig:
     init_sigma_n: float = 0.1
     sigma_n_floor: float = 1.0e-2   # 표준화 단위 잡음 하한 (정칙화 — 보간 과적합 방지)
     jitter: float = 1.0e-8
+    n_lags: int = 0
+    lag_mode: str = "full"
+    # Type-II ML 다중 재시작의 추가 초기 lengthscale 후보 (init_lengthscale 과 합집합).
+    # NLML 이 비볼록이라 단일 시작점은 "전부 잡음" 국소최적에 빠진다 — 근거·측정은
+    # `src.gp.train_offline._fit_channel` docstring. 비용은 후보 수에 비례한다.
+    init_lengthscale_restarts: tuple[float, ...] = (0.3, 1.0, 3.0)
     # GP 학습 데이터를 수집할 experiment 이름. 학습 궤적과 평가 궤적을 분리하기 위해
     # **config 로 고정**한다 (gp-residual.md 데이터 위생). 평가 시나리오가 바뀌어도
     # 학습 출처는 이 값 하나로 고정되므로, 평가가 나쁘다고 학습 데이터를 슬쩍 바꾸는
@@ -556,11 +569,23 @@ class GpConfig:
                 raise ValueError(f"GpConfig.{name} 는 양수여야 한다.")
         if not self.train_experiment:
             raise ValueError("GpConfig.train_experiment 가 비어 있다.")
+        if not (isinstance(self.n_lags, int) and self.n_lags >= 0):
+            raise ValueError(f"n_lags 는 0 이상의 정수여야 한다 (got {self.n_lags!r}).")
+        if self.lag_mode not in ("full", "delta"):
+            raise ValueError(f"lag_mode 는 'full' 또는 'delta' (got {self.lag_mode!r}).")
+        if not self.init_lengthscale_restarts:
+            raise ValueError("init_lengthscale_restarts 가 비어 있다 (최소 1개).")
+        if any(v <= 0.0 for v in self.init_lengthscale_restarts):
+            raise ValueError("init_lengthscale_restarts 는 전부 양수여야 한다.")
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "GpConfig":
         return cls(
             M=int(d["M"]),
+            n_lags=int(d.get("n_lags", 0)),
+            lag_mode=str(d.get("lag_mode", "full")),
+            init_lengthscale_restarts=tuple(
+                float(v) for v in d.get("init_lengthscale_restarts", (0.3, 1.0, 3.0))),
             init_lengthscale=float(d.get("init_lengthscale", 1.0)),
             init_sigma_f=float(d.get("init_sigma_f", 1.0)),
             init_sigma_n=float(d.get("init_sigma_n", 0.1)),
