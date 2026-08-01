@@ -45,7 +45,8 @@ def run_closed_loop(
     nominal_step_fn: (x, u, vx, kappa) -> x_next. 잔차용 명목 이산 전이.
                      MPC 예측과 동일한 함수여야 한다.
     x0: 초기 상태 (4,). 기본 0 (경로 위, 오차 0).
-    stop_margin: s 가 경로 끝 + 이 값[m] 을 넘으면 종료.
+    stop_margin: s 가 (경로 끝 * sim_cfg.n_laps) + 이 값[m] 을 넘으면 종료. n_laps
+                 는 폐루프 경로에서만 1보다 클 수 있다 (`reference.closed_loop`).
     estimator: 선택적 상태추정기(예: AugmentedKF). 있으면 측정 생성 -> predict/update
                를 돌리고 그 결과(P, innovation, d_hat, x_hat)를 로깅한다. 컨트롤러의
                StepModel 이 estimator.d_hat 를 스스로 참조하므로 runner 는 추정기를
@@ -64,6 +65,12 @@ def run_closed_loop(
             만들고 모델 보정에는 관여하지 않는다 (ekf-baseline.md 역할 혼동 금지).
     """
     from src.sim.logger import Log
+
+    if sim_cfg.n_laps > 1 and not reference.closed_loop:
+        raise ValueError(
+            f"sim.n_laps={sim_cfg.n_laps} 인데 경로가 폐루프가 아니다 (closed_loop=False). "
+            "열린 경로를 여러 바퀴 도는 것은 정의되지 않는다."
+        )
 
     N, dt = controller.N, controller.dt
     n_steps = int(round(sim_cfg.duration / dt))
@@ -128,9 +135,10 @@ def run_closed_loop(
                 ekf_P_d_block=estimator.P_d_block,
                 ekf_innovation=estimator.innovation.copy(),
                 ekf_d_hat=estimator.d_hat,
+                ekf_nis=estimator.nis,      # 혁신일관성: E[NIS]=n_meas 여야 P 크기가 맞다
             )
         if state_estimator is not None:
-            row.update(skf_P_diag=state_estimator.P_diag)
+            row.update(skf_P_diag=state_estimator.P_diag, skf_nis=state_estimator.nis)
         # 컨트롤러 쪽 스텝 로그 훅 (GP 케이스의 gp_mean/gp_var 등). 케이스 분기 없음:
         # runner 는 무엇이 실리는지 모르고, 있으면 그대로 합류시킨다.
         extra = controller.step_log()
@@ -142,7 +150,7 @@ def run_closed_loop(
         s += vx_now * dt
         u_prev = u
         vx_prev, kappa_prev = vx_now, kappa_now
-        if s > reference.total_length + stop_margin:
+        if s > reference.total_length * sim_cfg.n_laps + stop_margin:
             break
 
     return log.finalize()

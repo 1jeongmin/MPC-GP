@@ -1,11 +1,12 @@
 # Part 1 / 레이싱 트랙 + **현실적 센서 잡음** / 케이스 = gp / 시나리오 rtn_ay6.
 # rt_ay6 와 동일하고 sensor 그룹만 추가된다 (KF 는 R_kf 를 센서 사양에 맞춘 버전 사용).
 # 세 케이스 모두 **같은 잡음 실현**의 측정값을 제어 피드백으로 받는다 (통제변수).
+# GP 학습 출처는 loop10(gp: loop10) — racetrack 은 검증 전용, 학습 금지(2026-07-30).
 vehicle: sedan
 sim: racetrack
 path: racetrack
 mpc: default
-gp: racetrack
+gp: loop10
 plant: nonlinear
 sensor: realistic
 overrides:

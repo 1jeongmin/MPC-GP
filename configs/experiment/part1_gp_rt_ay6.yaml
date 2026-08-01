@@ -1,11 +1,12 @@
-# Part 1 / 레이싱 트랙 / 케이스 = MPC + offline GP / 시나리오 rt_ay6 (강도 외삽).
-# GP 는 같은 트랙의 a_y=4 로 학습됐다. 여기서 외삽이 일어나는 것이 의도다.
-# 사후분산이 커지고도 커버리지가 유지되면 UQ 주장 성립. 무너지면 그대로 보고한다.
+# Part 1 / 레이싱 트랙 / 케이스 = MPC + offline GP / 시나리오 rt_ay6 (강도 외삽 + 형상외삽).
+# GP 는 loop10 a_y=4 로 학습되고(gp_train_loop10, racetrack 은 학습 금지 —
+# 2026-07-30 결정) racetrack a_y=6 에서 평가된다. 사후분산이 커지고도 커버리지가
+# 유지되면 UQ 주장 성립. 무너지면 그대로 보고한다.
 vehicle: sedan
 sim: racetrack
 path: racetrack
 mpc: default
-gp: racetrack
+gp: loop10
 plant: nonlinear
 overrides:
   path.a_y_max: 6.0

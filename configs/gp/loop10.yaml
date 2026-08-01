@@ -1,0 +1,51 @@
+# loop10 학습 GP 설정 — racetrack 평가 시나리오(rt_*/rtn_*/rtf_*)가 쓴다 (2026-07-30).
+#
+# racetrack 은 검증 전용이라 더 이상 학습 출처가 될 수 없다 (racetrack.yaml/
+# gp_train_racetrack 폐기). 이 config 는 loop10 에서 10바퀴로 학습한 GP 를
+# racetrack 위에서 평가한다 — 즉 rt_*/rtn_*/rtf_* 는 이제 in-distribution 이 아니라
+# **형상외삽(OOD) 검증**이다 (평가 config 헤더에도 명시).
+#
+# 하이퍼파라미터·M·정칙화는 default.yaml/racetrack.yaml 과 **동일**하게 둔다 —
+# 경로가 바뀌었다고 GP 설정까지 바꾸면 이전 결과와 비교가 안 된다.
+
+# ## M = 2000 (2026-07-31) — 과신 해소를 위해 100 -> 2000 으로 확대
+#
+# M=100 은 5.3만 스텝 중 100개만 남겨 exact GP 를 학습했다. RBF 가 그 100점을 거의
+# 보간해버려 학습이 데이터를 크게 낭비했다. `scripts/tune_gp_M.py` 로 측정
+# (홀드아웃 = 딕셔너리에 안 들어간 점 4000개, 주 기준 = 홀드아웃 NLPD):
+#
+#      M    학습(s)     NLPD    z_std   95%커버   sigma_n(vy)  sigma_n(gam)
+#    100      0.3     -5.489    1.800   87.6%       0.0288       0.0742
+#    250      1.9     -5.980    1.452   91.3%       0.0580       0.0790
+#    500      5.3     -6.146    1.350   91.5%       0.0617       0.0562
+#   1000     34.8     -6.184    1.324   93.3%       0.0590       0.0633
+#  *2000    201.6     -6.206    1.241   94.1%       0.0565       0.1150   <- 채택
+#
+# NLPD 는 M=500 부터 평평해지지만(2000 은 1000 대비 0.35% 개선) z_std·커버리지는
+# 계속 좋아진다. 사용자가 "확실히 좋아질 만큼, 실시간성은 포기해도 된다"고
+# 지정했으므로 커버리지 기준으로 2000 을 택했다.
+#
+# **M=4000 은 채택하지 않았다**: (a) 학습만 40분(측정), (b) 스텝당 분산이 O(M^2)라
+# 약 14 ms 가 되어 solve(~8 ms)와 합치면 dt_ctrl=20 ms 를 넘는다(M=2000 은 분산
+# 3.6 ms + mu 0.8 ms 로 예산 안), (c) NLPD 가 이미 평평하다.
+#
+# M 은 **NLP 크기와 무관**하다 — mu 는 solve 당 1회 평가돼 파라미터 2개로만 주입된다
+# (mpc_gp.py). 커지는 것은 학습 O(M^3), 스텝당 분산 O(M^2), 저장 크기 O(M^2)
+# (gp_model.npz 가 약 64 MB — W 행렬 2개. results/ 는 git 제외라 무방).
+M: 2000                  # 딕셔너리 크기. 근거는 위 스윕 표.
+init_lengthscale: 1.0
+init_sigma_f: 1.0
+init_sigma_n: 0.1
+sigma_n_floor: 1.0e-2    # 정칙화 (Phase 7 진단). 커버리지 맞추려고 만지지 마라.
+jitter: 1.0e-8
+
+# 학습 출처 = loop10, 10바퀴 (gp_train_loop10.yaml -> sim/gp_train_loop10.yaml n_laps: 10).
+train_experiment: gp_train_loop10
+
+# 튜닝 예산 (공정성 — configs/ekf/*.yaml 과 같은 형식·같은 횟수로 기록).
+# M 선택은 **폐루프 평가가 아니라 홀드아웃 예측성능**으로 했다 — 폐루프 추종오차로
+# 고르면 미결 #4(목적함수는 추정 품질이지 추종오차가 아니다)를 GP 쪽에서 되풀이하게
+# 된다. KF 재튜닝(외란 RMSE + NIS)과 같은 원칙이다.
+tuning_method: type2_ml + heldout_nlpd_grid_on_M
+tuning_budget_closed_loop_evals: 0    # 폐루프 평가 0회 (홀드아웃 5점 그리드로 대체)
+tuning_selection_scenario: part1_gp_lpf_ay4   # in-distribution. 외삽(ay6/rtf_*) 열람 금지

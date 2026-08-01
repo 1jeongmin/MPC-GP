@@ -5,11 +5,12 @@
 # 한 번 거른 x_hat 을 제어 피드백으로 받는다(상태추정 품질이 통제변수).
 # 이 필터는 **상태추정 전용**이라 모델 보정에는 관여하지 않는다 — 케이스를
 # 가르는 차이는 여전히 모델 보정 방식(없음 / KF d_hat / GP mu_hat) 하나다.
+# GP 학습 출처는 loop10(gp: loop10) — racetrack 은 검증 전용, 학습 금지(2026-07-30).
 vehicle: sedan
 sim: racetrack
 path: right_turn
 mpc: default
-gp: racetrack
+gp: loop10
 plant: nonlinear
 sensor: realistic
 state_kf: default

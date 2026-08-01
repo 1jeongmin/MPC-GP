@@ -1,8 +1,11 @@
-# Part 1 / 레이싱 트랙 / 케이스 = MPC + offline GP / 시나리오 rt_ay4 (in-distribution).
-# GP 는 gp_train_racetrack (같은 트랙, a_y=4) 으로 학습된다 -> 학습 분포 안.
+# Part 1 / 레이싱 트랙 / 케이스 = MPC + offline GP / 시나리오 rt_ay4.
+# GP 는 loop10 에서 10바퀴로 학습되고(gp_train_loop10) racetrack 에서 평가된다
+# -> **형상외삽(OOD)**. racetrack 은 검증 전용이라 학습 출처가 될 수 없다
+# (2026-07-30 결정 — 예전에는 gp_train_racetrack 으로 같은 트랙에서 학습해
+# in-distribution 이었으나 그 경로는 폐기됐다).
 vehicle: sedan
 sim: racetrack
 path: racetrack
 mpc: default
-gp: racetrack
+gp: loop10
 plant: nonlinear

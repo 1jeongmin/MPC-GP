@@ -1,0 +1,31 @@
+# loop10 GP 학습 데이터 수집 전용 experiment (2026-07-30).
+#
+# configs/gp/loop10.yaml 의 train_experiment 가 이 이름을 가리킨다.
+# 학습 조건 = 10코너 폐루프(loop10), a_y=4.0(path 기본값), 비선형 플랜트, 명목 MPC
+# 주행, **10바퀴**(sim/gp_train_loop10.yaml 의 n_laps: 10).
+#
+# racetrack 은 검증 전용이라 학습 출처가 될 수 없다 (2026-07-30 결정,
+# .claude/rules/gp-residual.md 데이터 위생). racetrack 기반 학습(gp_train_racetrack,
+# gp/racetrack.yaml)은 이 결정으로 폐기됐다 — racetrack 평가 시나리오
+# (part1_gp_rt_*/rtn_*/rtf_*) 는 전부 이 experiment 로 학습된 GP 를 대신 쓴다.
+#
+# **gp 그룹을 참조하면 안 된다** (순환 — assemble.py 가 거부한다).
+# 평가 결과가 나쁘다고 이 파일의 경로·a_y·n_laps 를 바꾸지 마라. 그것은 학습
+# 데이터를 몰래 늘리는 것이고 gp-residual.md 가 금지한다.
+#
+# ## sensor + state_kf 를 참조하는 이유 — train/deploy 정합 (2026-07-31)
+#
+# 배포(part1_gp_lpf_*/rtf_*)에서 GP 는 `set_operating_point(x_fb, u_prev)` 로
+# **공통 상태추정기가 거른 상태**에서 z 를 만든다(mpc_gp.py). 그런데 여기에
+# sensor/state_kf 가 없으면 학습은 **참 상태**로 이뤄져 특징 분포가 어긋난다.
+# 깨끗한 데이터로 학습한 GP 는 잔차가 매끄러워 sigma_n 을 작게 배우고, 배포에서
+# 잡음 낀 z 를 받으면 산포를 과소평가한다 -> 과신(rtf_ay6 z_std=4.763).
+# 평가와 **같은 센서·같은 필터**를 써서 이 불일치를 없앤다.
+# 두 그룹을 빼면 옛 동작(참값 학습)으로 되돌아가므로 함부로 지우지 마라.
+vehicle: sedan
+sim: gp_train_loop10
+path: loop10
+mpc: default
+plant: nonlinear
+sensor: realistic
+state_kf: default

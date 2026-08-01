@@ -98,6 +98,7 @@ class Reference:
             self._s_nodes = np.asarray(s_list, dtype=float)
             self._k_nodes = np.asarray(k_list, dtype=float)
         self.total_length = float(self._s_nodes[-1])
+        self.closed_loop = bool(path_cfg.closed_loop)
 
     # ------------------------------------------------------------------ #
     # 곡률 · 속도 프로파일                                                 #
@@ -105,9 +106,15 @@ class Reference:
     def kappa_of_s(self, s):
         """곡률 kappa(s) [1/m]. 스칼라/배열 모두 지원.
 
-        s 를 [0, total_length] 로 clamp 한다 -> 경로 끝에서 마지막 곡률(직선=0) 유지.
+        폐루프(`closed_loop=True`)면 s 를 `total_length` 로 modulo wrap 해 여러 바퀴를
+        이어 돈다. 열린 경로는 종전대로 [0, total_length] 로 clamp -> 경로 끝에서
+        마지막 곡률(직선=0) 유지. `vx_max_of_s`/`get_preview` 는 이 함수를 통해서만
+        s 를 다루므로 wrap 이 자동으로 전파된다.
         """
-        s_c = np.clip(s, 0.0, self.total_length)
+        if self.closed_loop:
+            s_c = np.mod(s, self.total_length)
+        else:
+            s_c = np.clip(s, 0.0, self.total_length)
         return np.interp(s_c, self._s_nodes, self._k_nodes)
 
     def vx_max_of_s(self, s):

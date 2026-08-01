@@ -1,0 +1,22 @@
+# loop10 GP 학습용 시뮬레이션 타이밍 — 10바퀴 (2026-07-30).
+#
+# `sim/loop10.yaml`(1랩 평가용, duration 115 s)과 dt_plant/dt_ctrl/seed 는 동일하게
+# 두어 통제변수를 유지한다(sim-experiment.md 「통제해야 할 변수」). 다른 것은
+# duration 과 n_laps 뿐이다.
+#
+# duration 근거: loop10 1랩 105.3 s(a_y=4.0, path/loop10.yaml 실측) x 10 = 1053 s.
+# 1랩용 sim/loop10.yaml 이 쓴 것과 같은 비율(~9%) 여유를 그대로 적용해 1150.0 s.
+# duration 은 상한일 뿐 — 실제 종료는 `run_closed_loop` 의 호길이 조건
+# (s > total_length * n_laps + stop_margin) 에서 정확히 끊기므로 여유가 커도
+# 손해가 없다. 반대로 duration 이 부족하면 10바퀴를 못 채우고 조기 절단된다
+# (경고 없이 n_steps 소진으로 끝남 — 학습 후 로그의 최대 s 로 반드시 확인하라).
+#
+# n_laps: 10 — path/loop10.yaml 이 closed_loop: true 이므로 Reference 가 s 를
+# total_length 로 wrap 해 이 값만큼 이어 돈다. GP 는 racetrack 이 아니라 이
+# 맵에서만 학습한다 (racetrack 은 검증 전용, 학습 금지 — 2026-07-30 결정).
+
+dt_plant: 0.01   # s,  플랜트 적분 스텝 (100 Hz)
+dt_ctrl: 0.02    # s,  제어 스텝 (50 Hz). dt_ctrl / dt_plant = 2
+duration: 1150.0 # s,  10랩(최대 1053 s) + ~9% 여유
+seed: 0          # 난수 seed (loop10/default 와 동일 — 케이스 간 통제)
+n_laps: 10       # closed_loop 경로에서만 유효. 10바퀴 GP 학습 데이터 수집.

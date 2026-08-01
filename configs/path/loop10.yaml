@@ -77,9 +77,14 @@
 # `reconstruct_xy` 는 시각화 전용이다 (sim-experiment.md 경로 표현).
 #
 # **주의 — 1랩 105.3 s 는 racetrack(sim/racetrack.yaml duration 70 s)보다 길다.**
-# `configs/sim/loop10.yaml` (duration 115 s)을 함께 쓰라. duration 이 짧으면 랩을
-# 못 돈다 — `Reference.kappa_of_s` 가 s 를 clamp 하므로 경로 끝을 지나면 조용히
-# 직선이 무한히 이어지고, 그 구간은 잔차가 0 이라 결과를 희석시킨다.
+# `configs/sim/loop10.yaml` (duration 115 s, 1랩용) 또는 `configs/sim/gp_train_loop10.yaml`
+# (duration 1150 s, 10랩 GP 학습용)을 함께 쓰라. duration 이 필요한 바퀴 수보다 짧으면
+# `run_closed_loop` 가 목표 랩을 못 채우고 조기 종료한다.
+#
+# closed_loop: true (2026-07-30) — `Reference.kappa_of_s` 가 s 를 total_length 로
+# modulo wrap 한다(더 이상 clamp 하지 않는다). `SimConfig.n_laps` 로 여러 바퀴를
+# 이어 돌 수 있다 (`.claude/rules/gp-residual.md` 데이터 위생: GP 학습은 반드시 이
+# 맵에서만, racetrack 은 검증 전용이라 학습 금지).
 #
 # 생성 스크립트: 세션 스크래치패드 make_loop10.py (재현하려면 코너 표 + 폐합 솔버).
 # segments 스키마는 single_curve.yaml 과 동일: {length[m], kappa_end[1/m]},
@@ -88,6 +93,7 @@
 a_y_max: 4.0             # m/s^2. experiment 의 overrides 로 6.0 등으로 바꾼다.
 kappa_eps: 1.0e-4        # 1/m, 직선 취급 임계 (vx_max 0-division 방어)
 kappa_max: 0.05          # 1/m, 참고용 (R_min = 20 m). 빌더는 쓰지 않는다.
+closed_loop: true        # 시작·끝 폐합 (|d|=0.0246 m, 11 ppm — 위 검증 참조). N바퀴 학습용.
 
 segments:
   # ---- c01 완만한 고속 좌 (R=150, +110deg) ----

@@ -119,11 +119,16 @@ class SimConfig:
 
     단위: dt_plant/dt_ctrl/duration [s], seed [정수].
     플랜트 100 Hz / 제어 50 Hz. dt_ctrl 는 dt_plant 의 정수배여야 한다.
+
+    n_laps: 폐루프 경로를 몇 바퀴 돌지 (기본 1 = 종전 동작과 동일). 2 이상이면
+    경로(`PathConfig.closed_loop`)가 폐루프여야 한다 — 열린 경로에는 의미가 없다
+    (`run_closed_loop` 가 조립 시점에 이 조합을 거부한다).
     """
     dt_plant: float
     dt_ctrl: float
     duration: float
     seed: int
+    n_laps: int = 1
 
     def __post_init__(self) -> None:
         for name in ("dt_plant", "dt_ctrl", "duration"):
@@ -139,6 +144,8 @@ class SimConfig:
             )
         if self.dt_ctrl < self.dt_plant:
             raise ValueError("dt_ctrl 는 dt_plant 이상이어야 한다 (제어가 플랜트보다 느리다).")
+        if not (isinstance(self.n_laps, int) and self.n_laps >= 1):
+            raise ValueError(f"n_laps 는 1 이상의 정수여야 한다 (got {self.n_laps!r}).")
 
     @property
     def substeps(self) -> int:
@@ -152,6 +159,7 @@ class SimConfig:
             dt_ctrl=float(d["dt_ctrl"]),
             duration=float(d["duration"]),
             seed=int(d["seed"]),
+            n_laps=int(d.get("n_laps", 1)),
         )
 
 
@@ -204,12 +212,17 @@ class PathConfig:
       - `segments`: 합성 경로 (조각선형 클로소이드). single_curve, dlc.
       - `table`:    샘플된 kappa(s) 테이블 (외부 제공 트랙). racetrack.
     둘 다 주거나 둘 다 빠지면 예외 — 어느 쪽이 경로를 정의했는지 모호해지면 안 된다.
+
+    closed_loop: 시작점과 끝점이 물리적으로 이어지는 폐루프인지. True 면 `Reference`
+    가 호길이를 `total_length`로 wrap 해 여러 바퀴(`SimConfig.n_laps`)를 돌 수 있다.
+    기본 False — 열린 경로(single_curve, dlc, racetrack 등)는 종전대로 경로 끝에서 clamp.
     """
     a_y_max: float
     kappa_eps: float
     segments: tuple[PathSegment, ...] = ()
     kappa_max: float | None = None
     table: TableSource | None = None
+    closed_loop: bool = False
 
     def __post_init__(self) -> None:
         if not (self.a_y_max > 0.0):
@@ -257,6 +270,7 @@ class PathConfig:
             segments=segs,
             kappa_max=None if kmax is None else float(kmax),
             table=table,
+            closed_loop=bool(d.get("closed_loop", False)),
         )
 
 

@@ -1,10 +1,10 @@
 # Part 1 / 레이싱 트랙 계열 / 케이스 = MPC + offline GP / 시나리오 (d) 형상외삽 (right_turn).
-# GP 는 racetrack a_y=4 로 학습됐다(gp: racetrack -> gp_train_racetrack). 여기서
-# 재학습하지 않는다 — 학습된 GP #2 가 낯선 형상(우회전만)에서 어떻게 반응하는지가
-# 이 시나리오의 목적이다.
+# GP 는 loop10 a_y=4 로 10바퀴 학습됐다(gp: loop10 -> gp_train_loop10). racetrack 은
+# 검증 전용이라 학습 출처가 아니다(2026-07-30 결정). 여기서 재학습하지 않는다 —
+# 학습된 GP 가 낯선 형상(우회전만)에서 어떻게 반응하는지가 이 시나리오의 목적이다.
 vehicle: sedan
 sim: racetrack
 path: right_turn
 mpc: default
-gp: racetrack
+gp: loop10
 plant: nonlinear
