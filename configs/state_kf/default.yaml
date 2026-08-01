@@ -38,6 +38,22 @@ P0_diag: [0.5, 0.05, 0.01, 0.01]
 #   0.01 -> 2.872 | 3e-3 -> 4.850 | 1e-3 -> 7.590
 # 0.1 아래로 내리면 오히려 나빠진다 — 명목 모델(선형 타이어)이 실제로 틀렸으므로
 # 모델을 과신하면 편향이 커진다. 이 U자 곡선의 바닥이 "모델을 얼마나 믿을지"의 답이다.
-tuning_method: closed_loop_grid_on_estimation_rmse
-tuning_budget_closed_loop_evals: 7    # 예산 20 이내
-tuning_selection_scenario: part1_mpc_only_rtn_ay4   # in-distribution 만. 외삽 열람 금지
+#
+# **재튜닝 검증 (2026-07-30, rtf_ay4 = racetrack + 잡음 + 필터 조건)** — 값 변경 없음.
+# 위 그리드는 loop10/rtn_ay4 기준이라 rtf_* 조건에서 유효한지 미검증이었다. 같은
+# 목적함수로 현재값 대비 7점 재그리드(scripts/tune_kf.py state_kf):
+#   x0.1 -> 2.8404 | x0.3 -> 2.0896 | **x1.0(현재) -> 2.0308 (최적)** | x3 -> 2.1944
+#   x10 -> 2.3314 | x30 -> 2.3890 | x100 -> 2.4123
+# **현재값이 이미 최적이라 바꾸지 않는다.**
+#
+# 부 지표로 혁신일관성 NIS 를 함께 봤다(2026-07-30 사용자 승인 — 주 지표는 점추정치
+# 정확도만 보고 P 의 크기를 못 보므로 병행). 일관된 필터면 E[NIS]=n_meas=4:
+#   x0.1 -> 6.35 | x0.3 -> 4.26 | **x1.0 -> 3.15** | x3 -> 2.60 | x10~100 -> 2.29~2.11
+# 현재값의 NIS=3.15 는 4 보다 **작다** = P 가 약간 크다(보수적). 즉 이 필터는
+# **과신하지 않는다** — rtf_ay6 에서 관측된 과신(z_std=5.35)의 출처는 여기가 아니라
+# 모델보정 KF(configs/ekf/realistic_sensor.yaml)였고, 그쪽을 재튜닝해 해결했다.
+# 주 지표(x1.0)와 NIS(x0.3)가 다른 지점을 가리켰으나, 미결 #4 가 확정한 주 기준을
+# 따르고 보수적 방향이 UQ 에서 안전한 쪽이라 x1.0 유지로 사용자 확인받았다.
+tuning_method: closed_loop_grid_on_estimation_rmse + nis_consistency_check
+tuning_budget_closed_loop_evals: 14   # 7(rtn_ay4 최초) + 7(rtf_ay4 재검증). 예산 20 이내
+tuning_selection_scenario: part1_mpc_only_rtf_ay4   # in-distribution 만. 외삽(ay6) 열람 금지

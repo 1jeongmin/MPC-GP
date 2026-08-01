@@ -79,6 +79,11 @@ class AugmentedKF:
         self.P = np.asarray(P0, float).copy()
         self.x_hat = np.asarray(x0, float).reshape(n_state).copy()
         self.innovation = np.zeros(n_meas)
+        # NIS (normalized innovation squared) = nu^T S^-1 nu. update() 에서 채운다.
+        # 일관된 필터면 E[NIS] = n_meas (chi^2_{n_meas} 의 평균). 이것이 "P 가 옳은
+        # 크기인가" 를 보는 표준 KF 진단이다 — 추정 RMSE(점추정치 정확도)와는 다른
+        # 질문이라 튜닝에서 둘을 **병행**해서 본다 (2026-07-30 사용자 승인).
+        self.nis = 0.0
 
         # 이산 전이 + 야코비안 (rk4 + ca.jacobian). 명목이 선형이면 F 는 상수.
         x = ca.SX.sym("x", n_state)
@@ -120,12 +125,15 @@ class AugmentedKF:
         self.P = 0.5 * (self.P + self.P.T)   # 대칭 유지
 
     def update(self, y: np.ndarray) -> None:
-        """갱신 스텝: 측정 y 로 보정. innovation 저장."""
+        """갱신 스텝: 측정 y 로 보정. innovation 과 NIS 저장."""
         y = np.asarray(y, float).reshape(self.n_meas)
         H = np.array(self._H_jac(self.x_hat))
         y_pred = np.array(self._h(self.x_hat)).reshape(self.n_meas)
         self.innovation = y - y_pred
         S = H @ self.P @ H.T + self.R
+        # S 는 **사전(prior) 공분산**으로 만든 혁신 공분산이다 — 아래에서 P 를 갱신하기
+        # 전에 NIS 를 뽑아야 한다. inv 대신 solve 로 (수치 안정).
+        self.nis = float(self.innovation @ np.linalg.solve(S, self.innovation))
         K = self.P @ H.T @ np.linalg.inv(S)
         self.x_hat = self.x_hat + K @ self.innovation
         I = np.eye(self.n_state)

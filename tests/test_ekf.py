@@ -133,3 +133,67 @@ def test_kf_beats_mpc_only(sedan, ekf_cfg) -> None:
     assert log["ekf_P_diag"].shape[1] == 6 and log["ekf_d_hat"].shape[1] == 2
     assert np.max(np.abs(log["ekf_d_hat"])) > 1e-2
     assert np.all(log["converged"].astype(bool))
+
+
+# --------------------------------------------------------------------------- #
+# 혁신일관성 NIS — Q/R 튜닝의 부 지표 (2026-07-30)                               #
+# --------------------------------------------------------------------------- #
+def test_nis_matches_manual_formula(sedan, ekf_cfg) -> None:
+    """NIS = nu^T S^-1 nu 가 수기 계산과 일치.
+
+    가장 틀리기 쉬운 지점은 **어느 P 로 S 를 만드는가**다. S 는 갱신 **전**(prior)
+    공분산으로 만들어야 한다 — 갱신 후 P 를 쓰면 NIS 가 체계적으로 커진다.
+    """
+    dt = 0.02
+    kf = make_augmented_kf(sedan, ekf_cfg, dt)
+    kf.predict(0.01, 15.0, 0.0)
+
+    P_prior = kf.P.copy()
+    x_prior = kf.x_hat.copy()
+    y = np.array([0.05, 0.01, 0.002, 0.03])
+
+    H = np.zeros((len(MEAS_ROWS), 6))
+    for i, r in enumerate(MEAS_ROWS):
+        H[i, r] = 1.0
+    nu_expect = y - H @ x_prior
+    S = H @ P_prior @ H.T + np.diag(ekf_cfg.R_kf_diag)
+    nis_expect = float(nu_expect @ np.linalg.solve(S, nu_expect))
+
+    kf.update(y)
+    assert np.allclose(kf.innovation, nu_expect, atol=1e-12)
+    assert abs(kf.nis - nis_expect) <= 1e-9 * max(1.0, abs(nis_expect)), (
+        f"nis={kf.nis} != 수기값 {nis_expect}")
+
+
+def test_nis_consistent_when_model_and_noise_match(sedan) -> None:
+    """모델·잡음이 정확히 맞는 필터의 평균 NIS 가 n_meas(=4) 근방.
+
+    이것이 NIS 를 "P 가 옳은 크기인가" 의 판정 기준으로 쓸 수 있는 근거다
+    (일관된 필터에서 NIS ~ chi^2_{n_meas}, 평균 = n_meas). 플랜트를 **명목 선형**
+    으로 두어 모델오차를 0 으로 만들고, 측정잡음만 R 과 일치시킨다.
+    """
+    from src.estimation.state_estimator import make_state_kf
+    from src.models.integrators import plant_step
+
+    dt = 0.02
+    std = np.array([0.03, 0.002, 0.003, 0.03])       # 주입 잡음 = R 의 제곱근
+    cfg = replace(load_group("state_kf", "default"),
+                  Q_diag=(1e-10, 1e-10, 1e-10, 1e-10),   # 모델오차 0 -> Q ~ 0 이 정합
+                  R_diag=tuple(std**2))
+    kf = make_state_kf(sedan, cfg, dt)
+    plant = make_rhs_np(sedan)                        # 명목과 **동일** (모델오차 없음)
+    rng = np.random.default_rng(0)
+
+    x = np.zeros(4)
+    u, vx, kappa = 0.01, 15.0, 0.0
+    nis_hist = []
+    for k in range(3000):
+        y = x + rng.normal(scale=std)
+        kf.filter_step(y, u, vx, kappa, first=(k == 0))
+        nis_hist.append(kf.nis)
+        x = plant_step(plant, x, u, (vx, kappa), dt)
+
+    mean_nis = float(np.mean(nis_hist[500:]))         # 초기 과도 제외
+    assert 3.0 <= mean_nis <= 5.5, (
+        f"정합 필터의 평균 NIS={mean_nis:.3f} 가 n_meas=4 근방이 아니다 "
+        "(NIS 수식이나 S 구성이 틀렸을 가능성)")
