@@ -37,11 +37,32 @@ class GpChannel:
         return k @ self.alpha
 
     def var_std(self, z_std: np.ndarray) -> np.ndarray:
-        """표준화 입력에서 표준화 사후분산. z_std:(n,d) -> (n,)."""
+        """**잠재함수** 사후분산 Var[f*] (표준화). z_std:(n,d) -> (n,).
+
+        관측잡음 sigma_n^2 은 **포함하지 않는다** — "이 입력 근처에 데이터가 있는가"
+        (epistemic)를 재는 양이라 불확실성 지도에 쓴다. 관측된 잔차를 덮는지 보는
+        캘리브레이션에는 `var_obs_std`(= 여기에 sigma_n^2 을 더한 것)를 써야 한다.
+        (Rasmussen & Williams 2006, Eq. 2.19 vs 2.24 — 예측 대상이 f* 냐 y* 냐.)
+
+        `sum((k@W)*k, axis=1)` 는 `einsum("ij,jk,ik->i", k, W, k)` 와 **수학적으로
+        동일**하지만 행렬곱이 BLAS 로 내려가 M 이 커질수록 훨씬 빠르다. M 을 100 ->
+        수천으로 키우면서(2026-07-31) 이 항이 스텝당 O(M^2) 병목이 되어 교체했다.
+        """
         k = ard_rbf_np(z_std, self.Z, self.lengthscales, self.sigma_f)   # (n,M)
         prior = self.sigma_f**2                                          # k(z,z)
-        v = prior - np.einsum("ij,jk,ik->i", k, self.W, k)
+        v = prior - np.sum((k @ self.W) * k, axis=1)
         return np.maximum(v, 0.0)
+
+    def var_obs_std(self, z_std: np.ndarray) -> np.ndarray:
+        """**관측** 예측분산 Var[y*] = Var[f*] + sigma_n^2 (표준화). z_std:(n,d) -> (n,).
+
+        캘리브레이션이 비교하는 대상은 실제로 관측된 1스텝 잔차이므로 이 쪽이 맞다.
+        M 이 커지면 Var[f*] 가 데이터 근처에서 0 으로 붕괴해 sigma_n^2 이 지배항이
+        된다 — M=1000 에서 Var[f*]=2.35e-8 vs sigma_n^2=3.66e-7 로 **15배**였고,
+        이 항을 빼먹은 탓에 "M 을 키우면 캘리브레이션이 나빠진다"는 잘못된 결론이
+        나왔다 (2026-07-31 진단).
+        """
+        return self.var_std(z_std) + self.sigma_n**2
 
 
 def _nlml(theta_log: np.ndarray, Zs: np.ndarray, y: np.ndarray, jitter: float) -> float:
@@ -94,9 +115,21 @@ class TwoChannelGP:
         return self.r_scaler.inverse(mstd)
 
     def predict_var(self, z: np.ndarray) -> np.ndarray:
-        """실단위 사후분산. z:(n,3) -> (n,2). 분산은 스케일^2 로 역표준화."""
+        """실단위 **잠재** 사후분산 Var[f*]. z:(n,3) -> (n,2). 스케일^2 로 역표준화.
+
+        **불확실성 지도(epistemic)용**이다. 캘리브레이션에는 `predict_var_obs` 를 써라.
+        """
         zs = self.z_scaler.transform(z)
         vstd = np.column_stack([ch.var_std(zs) for ch in self.channels])   # (n,2)
+        return vstd * (self.r_scaler.scale**2)
+
+    def predict_var_obs(self, z: np.ndarray) -> np.ndarray:
+        """실단위 **관측** 예측분산 Var[y*] = Var[f*] + sigma_n^2. z:(n,3) -> (n,2).
+
+        **캘리브레이션용**이다 (비교 대상이 관측된 잔차이므로).
+        """
+        zs = self.z_scaler.transform(z)
+        vstd = np.column_stack([ch.var_obs_std(zs) for ch in self.channels])
         return vstd * (self.r_scaler.scale**2)
 
 

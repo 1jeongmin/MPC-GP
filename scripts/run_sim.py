@@ -41,7 +41,12 @@ def compute_calibration(log, exp) -> dict | None:
     r_true = log["residual"][:, 0:2]        # 동적 채널만 (기구학 채널은 진단용)
 
     if "gp_mean" in log:
-        m = calibration_metrics(r_true, log["gp_mean"], log["gp_var"])
+        # **관측** 예측분산 Var[y*]=Var[f*]+sigma_n^2 을 쓴다 — 비교 대상이 관측된
+        # 잔차이므로 잠재분산(gp_var)을 쓰면 sigma_n^2 만큼 체계적으로 과신한다.
+        # M 이 클수록 Var[f*] 가 0 으로 붕괴해 그 오차가 커진다 (2026-07-31 진단).
+        # gp_var_obs 가 없는 옛 로그는 종전대로 gp_var 로 떨어진다(하위호환).
+        var = log["gp_var_obs"] if "gp_var_obs" in log else log["gp_var"]
+        m = calibration_metrics(r_true, log["gp_mean"], var)
         return {"source": "gp", "metrics": m}
     if "ekf_d_hat" in log:
         mean, var = kf_residual_prediction(log, exp.vehicle, exp.sim.dt_ctrl)

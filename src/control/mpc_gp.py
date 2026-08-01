@@ -45,7 +45,8 @@ class GPStepModel:
         self._mu_func = build_mu_function(M)          # CasADi GP 평균 표현
         self._p = gp_param_vector(gp)                 # 주입 파라미터 (고정)
         self._mu = np.zeros(2)
-        self._var = np.zeros(2)
+        self._var = np.zeros(2)          # 잠재 Var[f*] — 불확실성 지도(epistemic)용
+        self._var_obs = np.zeros(2)      # 관측 Var[y*] = Var[f*]+sigma_n^2 — 캘리브레이션용
 
     def set_operating_point(self, x0: np.ndarray, u_prev: float) -> None:
         """현재 작동점 z=[v_y, gamma, delta_prev] 에서 GP 평균·사후분산을 평가·저장.
@@ -57,7 +58,12 @@ class GPStepModel:
         """
         z = np.array([x0[0], x0[1], u_prev])
         self._mu = np.array(self._mu_func(z, self._p)).reshape(2)
+        # 두 분산을 **구분해서** 저장한다 (2026-07-31 사용자 확정):
+        #   var     = Var[f*]            -> "여기 데이터가 있었나" (epistemic, 지도용)
+        #   var_obs = Var[f*]+sigma_n^2  -> 관측된 잔차를 덮는가 (캘리브레이션용)
+        # 하나로 뭉치면 둘 중 한 질문에 반드시 틀린 답을 준다.
         self._var = np.asarray(self.gp.predict_var(z), float).reshape(2)
+        self._var_obs = np.asarray(self.gp.predict_var_obs(z), float).reshape(2)
 
     def step_sym(self, x, u, vx, kappa, p_extra):
         correction = ca.vertcat(p_extra[0], p_extra[1], 0.0, 0.0)   # B_d @ mu_hat
@@ -69,10 +75,12 @@ class GPStepModel:
     def step_log(self) -> dict[str, np.ndarray]:
         """MpcBase.step_log 훅 — 이번 스텝의 GP 평균·사후분산을 로그에 싣는다.
 
-        단위: gp_mean/gp_var 는 **이산 잔차 공간**(v_y [m/s], gamma [rad/s]) 이다.
-        표준화 공간이 아니다 (casadi_export 가 역표준화해 반환).
+        단위: gp_mean/gp_var/gp_var_obs 는 **이산 잔차 공간**(v_y [m/s], gamma
+        [rad/s]) 이다. 표준화 공간이 아니다 (casadi_export 가 역표준화해 반환).
+        gp_var = 잠재 Var[f*](지도용), gp_var_obs = Var[y*](캘리브레이션용).
         """
-        return {"gp_mean": self._mu.copy(), "gp_var": self._var.copy()}
+        return {"gp_mean": self._mu.copy(), "gp_var": self._var.copy(),
+                "gp_var_obs": self._var_obs.copy()}
 
 
 def make_gp_mpc(vehicle: VehicleConfig, cfg_mpc: MpcConfig, dt_ctrl: float,

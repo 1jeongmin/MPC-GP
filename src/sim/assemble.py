@@ -15,6 +15,7 @@ config 로만」). 새 케이스를 붙일 때는 `_CASE_BUILDERS` 에 한 줄�
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Callable
 
 import numpy as np
@@ -28,6 +29,9 @@ from src.estimation.ekf import make_augmented_kf
 from src.models.integrators import make_rhs_np
 from src.models.nonlinear_bicycle import make_nonlinear_rhs_np
 from src.path.reference import Reference
+
+ROOT = Path(__file__).resolve().parents[2]
+GP_DISK_CACHE_DIR = ROOT / "data" / "gp_cache"
 
 # plant 키 -> 연속 우변 팩토리. 새 플랜트는 여기에만 추가한다.
 _PLANT_FACTORIES: dict[str, Callable] = {
@@ -88,8 +92,31 @@ _CASE_BUILDERS: tuple[tuple[str, Callable[[ExperimentConfig, dict], Case]], ...]
 
 # 학습된 GP 캐시. 키 = (학습 experiment 이름, GpConfig). 같은 학습 출처·같은 설정이면
 # 여러 평가 시나리오가 **같은 GP** 를 써야 한다 — 재학습하면 시나리오마다 GP 가 미묘하게
-# 달라져 비교가 오염된다. 부수적으로 레이싱 트랙(학습 주행 1회 = 56 s)에서 시간도 아낀다.
+# 달라져 비교가 오염된다. 프로세스 메모리에만 있어 같은 실행 안에서만 유효 — 프로세스가
+# 바뀌면 아래 디스크 캐시(GP_DISK_CACHE_DIR)로 넘어간다.
 _GP_CACHE: dict[tuple, Any] = {}
+
+
+def _gp_disk_cache_path(exp: ExperimentConfig, tr: ExperimentConfig) -> Path:
+    """학습 출처 스냅샷 + GpConfig 전체를 해시해 캐시 파일 경로를 만든다.
+
+    학습 config(경로·차량·MPC·플랜트)나 GpConfig 하이퍼파라미터가 하나라도 바뀌면
+    다른 해시가 나와 자동으로 재학습된다 — 오래된 캐시를 몰래 재사용하는 사고를
+    구조적으로 막는다(수동으로 캐시를 무효화할 필요가 없다).
+    """
+    import hashlib
+    import json
+    from dataclasses import asdict
+
+    payload = {
+        "train_experiment": exp.gp.train_experiment,
+        "train_snapshot": tr.to_snapshot(),
+        "gp_config": asdict(exp.gp),
+    }
+    digest = hashlib.sha256(
+        json.dumps(payload, sort_keys=True, default=str).encode()
+    ).hexdigest()[:16]
+    return GP_DISK_CACHE_DIR / f"{exp.gp.train_experiment}_{digest}.npz"
 
 
 def train_gp_from_config(exp: ExperimentConfig):
@@ -97,11 +124,18 @@ def train_gp_from_config(exp: ExperimentConfig):
 
     학습 데이터는 명목 MPC 로 학습 experiment 를 주행해 모은 잔차다. 학습 experiment
     자체도 조합 파일이므로 플랜트·경로·a_y 가 재현성 스냅샷에 그대로 남는다.
-    같은 (학습 experiment, GpConfig) 조합은 캐시에서 재사용한다.
+    같은 (학습 experiment, GpConfig) 조합은 먼저 프로세스 메모리 캐시에서, 없으면
+    디스크 캐시(`data/gp_cache/`, git 제외)에서 재사용한다 — loop10 10바퀴 학습처럼
+    시간이 오래 걸리는 학습을 프로세스를 새로 띄울 때마다 반복하지 않기 위해서다
+    (2026-07-30). 학습 config 가 바뀌면 해시가 달라져 자동으로 재학습된다.
+
+    학습 experiment 가 `sensor`/`state_kf` 를 참조하면 **배포와 같은 조건**(측정잡음
+    + 공통 상태추정기)으로 데이터를 모은다 — `run_case` 와 **같은 팩토리**를 쓴다.
+    참값으로 학습해 놓고 필터값으로 배포하면 특징 분포가 어긋난다 (2026-07-31).
     """
     from src.config import load_experiment
-    from src.gp.dataset import collect_residual_data
-    from src.gp.train_offline import train
+    from src.gp.dataset import save_dataset
+    from src.gp.train_offline import load_gp, save_gp, train
 
     key = (exp.gp.train_experiment, exp.gp)
     if key in _GP_CACHE:
@@ -113,10 +147,55 @@ def train_gp_from_config(exp: ExperimentConfig):
             f"GP 학습 experiment '{exp.gp.train_experiment}' 가 gp 그룹을 참조한다 (순환). "
             "학습 experiment 는 명목 MPC 케이스여야 한다."
         )
-    ds = collect_residual_data(tr.vehicle, tr.mpc, tr.sim, tr.path, plant=tr.plant)
-    gp = train(ds, exp.gp)
+
+    cache_path = _gp_disk_cache_path(exp, tr)
+    ds_path = cache_path.with_name(cache_path.stem + "_dataset.npz")
+    if cache_path.exists() and ds_path.exists():
+        gp = load_gp(cache_path)
+    else:
+        ds = collect_training_dataset(tr)
+        gp = train(ds, exp.gp)
+        save_gp(cache_path, gp)
+        # 데이터셋도 함께 남긴다 — 캐시 적중 시에도 학습 산출물을 실험 폴더
+        # (`results/part1_*/training_results/`)에 기록할 수 있어야 한다.
+        save_dataset(ds_path, ds, tr.to_snapshot(), tr.sim.seed)
+
     _GP_CACHE[key] = gp
     return gp
+
+
+def collect_training_dataset(tr: ExperimentConfig):
+    """학습 experiment 를 주행해 잔차 데이터셋을 모은다 (production 경로 단일 출처).
+
+    센서·상태추정기는 `run_case` 와 **같은 팩토리**로 만든다. 이 함수를 우회해
+    데이터를 따로 모으면 배포에 쓰이는 GP 와 다른 GP 가 만들어진다.
+    """
+    from src.estimation.state_estimator import make_state_kf
+    from src.gp.dataset import collect_residual_data
+    from src.sim.sensor import make_sensor
+
+    rng = np.random.default_rng(tr.sim.seed)   # seed 는 학습 experiment 것 (재현성)
+    sensor = make_sensor(tr.sensor, rng)
+    state_est = (None if tr.state_kf is None
+                 else make_state_kf(tr.vehicle, tr.state_kf, tr.sim.dt_ctrl))
+    return collect_residual_data(tr.vehicle, tr.mpc, tr.sim, tr.path, plant=tr.plant,
+                                 sensor=sensor, state_estimator=state_est, rng=rng)
+
+
+def gp_training_artifacts(exp: ExperimentConfig) -> tuple:
+    """(학습 experiment config, 학습된 GP, 데이터셋) — 리포트 기록용.
+
+    `train_gp_from_config` 가 캐시에 남긴 데이터셋을 재사용하므로 재주행하지 않는다.
+    """
+    from src.config import load_experiment
+    from src.gp.dataset import load_dataset
+
+    tr = load_experiment(exp.gp.train_experiment)
+    gp = train_gp_from_config(exp)                     # 캐시 적중 (이미 학습됨)
+    ds_path = _gp_disk_cache_path(exp, tr).with_name(
+        _gp_disk_cache_path(exp, tr).stem + "_dataset.npz")
+    ds = load_dataset(ds_path) if ds_path.exists() else collect_training_dataset(tr)
+    return tr, gp, ds
 
 
 def build_case(exp: ExperimentConfig) -> Case:
