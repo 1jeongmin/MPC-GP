@@ -1,0 +1,23 @@
+# Part 1 / 케이스 1 = **학습맵(loop10) + 가속도 그대로(a_y=4)** / GP 잔차 보정.
+#
+# ## ★★ 이 시나리오는 in-distribution 이다 — 일반화 근거로 쓰지 마라
+#
+# gp: loop10 -> gp_train_loop10 -> path: loop10, a_y=4.0, sensor/state_kf 동일,
+# sim.seed 도 0 으로 같다. 즉 **경로·가속도·잡음 실현이 학습과 겹친다.**
+# 학습은 10바퀴 mpc_only 주행이고 평가는 1바퀴 mpc_gp 주행이라 궤적이 완전히
+# 같지는 않지만, 분포는 겹친다고 봐야 한다.
+#
+# 따라서 이 케이스가 좋게 나와도 "GP 가 일반화한다"의 근거가 **아니다.**
+# 읽는 방법은 하나뿐이다 — "학습 분포 안에서는 GP 가 자기 불확실성을 옳게 말하는가"
+# 라는 진단. 여기서조차 캘리브레이션이 안 맞으면 원인이 분포이동이 아니라 다른 데
+# (커널·결합 형태·sigma_n_floor) 있다는 뜻이다.
+# 일반화 축은 케이스 2(lpf_ay6, 강도 외삽) / 3(rtf_ay4, 형상 외삽) / 4(rtf_ay6, 둘 다)다.
+# gp-residual.md 「학습 궤적과 평가 궤적을 분리한다」와의 관계를 리포트에 명시할 것.
+vehicle: sedan
+sim: loop10
+path: loop10
+mpc: default
+gp: loop10
+plant: nonlinear
+sensor: realistic
+state_kf: default

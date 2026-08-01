@@ -1,0 +1,12 @@
+# Part 1 / 케이스 1 = **학습맵(loop10) + 가속도 그대로(a_y=4)** / 모델보정 KF.
+# part1_mpc_only_lpf_ay4 와 통제변수 동일 + ekf 그룹만 추가.
+# ekf: realistic_sensor — R_kf 가 센서 사양과 일치하고 Q_d 는 외란 RMSE + NIS 로
+# 재튜닝된 버전이다 (2026-07-30, configs/ekf/realistic_sensor.yaml 헤더 참조).
+vehicle: sedan
+sim: loop10
+path: loop10
+mpc: default
+ekf: realistic_sensor
+plant: nonlinear
+sensor: realistic
+state_kf: default

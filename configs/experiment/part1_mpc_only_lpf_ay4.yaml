@@ -1,0 +1,13 @@
+# Part 1 / 케이스 1 = **학습맵(loop10) + 가속도 그대로(a_y=4)** / 보정 없음.
+# 잡음 + 공통 상태추정기 조건 (rtf_* 와 같은 센서·같은 필터. 경로·sim 만 다르다).
+#
+# ★ 이 시나리오는 GP 의 **학습맵 그 자체**다 (gp/loop10.yaml -> gp_train_loop10).
+# GP 케이스에서는 in-distribution 진단이지 일반화 성능이 아니다 — 자세한 주의는
+# part1_gp_lpf_ay4.yaml 헤더 참조. mpc_only/kf 는 GP 와 무관하므로 그냥 기준선이다.
+vehicle: sedan
+sim: loop10
+path: loop10
+mpc: default
+plant: nonlinear
+sensor: realistic
+state_kf: default

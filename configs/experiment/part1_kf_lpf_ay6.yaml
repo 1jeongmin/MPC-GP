@@ -1,0 +1,12 @@
+# Part 1 / 케이스 2 = **학습맵(loop10) + 가속도 증가(a_y=6)** / 모델보정 KF.
+# part1_mpc_only_lpf_ay6 와 통제변수 동일 + ekf 그룹만 추가.
+vehicle: sedan
+sim: loop10
+path: loop10
+mpc: default
+ekf: realistic_sensor
+plant: nonlinear
+sensor: realistic
+state_kf: default
+overrides:
+  path.a_y_max: 6.0

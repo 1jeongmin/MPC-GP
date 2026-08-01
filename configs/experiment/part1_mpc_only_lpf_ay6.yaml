@@ -1,0 +1,11 @@
+# Part 1 / 케이스 2 = **학습맵(loop10) + 가속도 증가(a_y=6)** / 보정 없음.
+# lpf_ay4 와 a_y_max 하나만 다르다 (강도 외삽 축의 통제 — dlc/rt_ay6 와 같은 원칙).
+vehicle: sedan
+sim: loop10
+path: loop10
+mpc: default
+plant: nonlinear
+sensor: realistic
+state_kf: default
+overrides:
+  path.a_y_max: 6.0

@@ -15,7 +15,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 import yaml
 
-from src.config import CONFIGS_DIR, VehicleConfig
+from src.config import CONFIGS_DIR, GpConfig, VehicleConfig
+from src.eval.calibration import calibration_metrics
+from src.gp.dataset import ResidualDataset
+from src.gp.train_offline import TwoChannelGP
 from src.path.reference import Reference
 
 
@@ -240,6 +243,173 @@ def make_uncertainty_map_figure(gp, results: dict[str, dict], out_dir: Path,
                  f"[{scenario}]")
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / f"part1_{scenario}_uncertainty.png"
+    fig.savefig(path, dpi=120)
+    plt.close(fig)
+    return path
+
+
+# --------------------------------------------------------------------------- #
+# GP 학습 결과 시각화 (results/training_results/)                                #
+# --------------------------------------------------------------------------- #
+def make_track_shape_figure(reference: Reference, out_dir: Path, run_id: str) -> Path:
+    """GP 학습에 쓰인 트랙 형상 그림 — (x,y) 곡률 색상 + kappa(s) + vx_max(s).
+
+    학습 **결과**가 아니라 학습 **조건**(어떤 경로에서 데이터를 모았는지) 시각화다.
+    """
+    x, y, _ = reference.reconstruct_xy(ds=0.5)
+    s = np.linspace(0.0, reference.total_length, len(x))
+    kappa = reference.kappa_of_s(s)
+    vx_max = reference.vx_max_of_s(s)
+    kmax = float(np.max(np.abs(kappa))) or 1.0
+
+    fig, ax = plt.subplots(1, 3, figsize=(16, 5), constrained_layout=True)
+
+    a = ax[0]
+    sca = a.scatter(x, y, c=kappa, cmap="coolwarm", s=4, vmin=-kmax, vmax=kmax)
+    a.plot(x[0], y[0], "k^", ms=10, label="start")
+    fig.colorbar(sca, ax=a, label="kappa [1/m]")
+    a.set_aspect("equal", "box")
+    a.set_title(f"Track shape (total {reference.total_length:.0f} m, "
+                f"closed_loop={reference.closed_loop})")
+    a.set_xlabel("x [m]"); a.set_ylabel("y [m]"); a.legend(fontsize=8)
+
+    a = ax[1]
+    a.plot(s, kappa, color="C0")
+    a.axhline(0, color="0.7", lw=0.8)
+    a.set_title("Curvature profile"); a.set_xlabel("s [m]"); a.set_ylabel("kappa [1/m]")
+    a.grid(True, alpha=0.3)
+
+    a = ax[2]
+    a.plot(s, vx_max, color="C2")
+    a.set_title(f"Speed profile (a_y_max={reference.cfg.a_y_max:.1f} m/s^2)")
+    a.set_xlabel("s [m]"); a.set_ylabel("vx_max [m/s]")
+    a.grid(True, alpha=0.3)
+
+    fig.suptitle(f"GP training track: {run_id}")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    path = out_dir / f"{run_id}_track_shape.png"
+    fig.savefig(path, dpi=120)
+    plt.close(fig)
+    return path
+
+
+def make_gp_training_figure(gp: TwoChannelGP, dataset: ResidualDataset, cfg: GpConfig,
+                            out_dir: Path, run_id: str, s: np.ndarray, t: np.ndarray) -> Path:
+    """GP 학습 결과 종합 그림 — 상태공간 커버리지 · 사후 std 지도 · 적합도 · 하이퍼파라미터.
+
+    `dataset`은 학습 궤적 전체(딕셔너리 subsample 이전), `gp`는 그 위에서 학습된
+    TwoChannelGP. `s`/`t`는 같은 궤적의 호길이·시간(잔차-vs-호길이 그림용).
+    적합도 그림은 **같은 궤적 위 in-sample 확인**이다 — 별도 평가 궤적과의 비교가
+    아니므로 성능 주장이 아니라 학습 진단으로만 읽는다.
+    """
+    Z, R = dataset.Z, dataset.R
+    train_Z = gp.z_scaler.inverse(gp.channels[0].Z)      # 표준화 -> 물리 단위 딕셔너리
+    pred_mean = gp.predict_mean(Z)                        # 궤적 전체에서 in-sample 예측
+    rms = np.sqrt(np.mean(R**2, axis=0))
+
+    stride = max(1, len(Z) // 5000)
+    idx = slice(None, None, stride)
+
+    fig, ax = plt.subplots(2, 3, figsize=(17, 10), constrained_layout=True)
+
+    # (0,0) 상태공간 커버리지: 궤적 산점 + 학습 딕셔너리.
+    a = ax[0, 0]
+    sca = a.scatter(Z[idx, 0], np.degrees(Z[idx, 1]), c=np.degrees(Z[idx, 2]),
+                    cmap="viridis", s=3, alpha=0.5)
+    fig.colorbar(sca, ax=a, label="delta [deg]")
+    a.scatter(train_Z[:, 0], np.degrees(train_Z[:, 1]), marker="x", s=40, c="k",
+             linewidths=1.1, label=f"GP dictionary (M={len(train_Z)})")
+    a.set_title(f"State-space coverage + training dictionary (N={len(Z)})")
+    a.set_xlabel("v_y [m/s]"); a.set_ylabel("gamma [deg/s]"); a.legend(fontsize=8)
+
+    # (0,1)/(0,2) 사후 std 지도 (make_uncertainty_map_figure 와 같은 격자 함수 재사용).
+    delta_slice = float(np.median(Z[:, 2]))
+    vy = np.linspace(Z[:, 0].min(), Z[:, 0].max(), 90)
+    gam = np.linspace(Z[:, 1].min(), Z[:, 1].max(), 90)
+    for j, (name, unit) in enumerate([("v_y", "m/s"), ("gamma", "rad/s")]):
+        a = ax[0, 1 + j]
+        VY, GAM, STD = _gp_std_grid(gp, j, vy, gam, delta_slice)
+        cf = a.contourf(VY, np.degrees(GAM), STD, levels=24, cmap="viridis")
+        fig.colorbar(cf, ax=a, label=f"posterior std [{unit}]")
+        a.scatter(train_Z[:, 0], np.degrees(train_Z[:, 1]), s=9, c="w",
+                 edgecolors="k", linewidths=0.4)
+        a.set_title(f"Posterior std map: {name}\n"
+                    f"(delta slice={np.degrees(delta_slice):.2f} deg)")
+        a.set_xlabel("v_y [m/s]"); a.set_ylabel("gamma [deg/s]")
+
+    # (1,0)/(1,1) 잔차 vs 호길이 + GP 평균 적합(in-sample).
+    for j, (name, unit) in enumerate([("v_y", "m/s"), ("gamma", "rad/s")]):
+        a = ax[1, j]
+        a.plot(s[idx], R[idx, j], color="0.6", lw=0.6, label="actual residual")
+        a.plot(s[idx], pred_mean[idx, j], color=f"C{j}", lw=0.8, alpha=0.85,
+              label="GP mean (in-sample)")
+        a.set_title(f"Residual vs arclength: {name} (in-sample fit)")
+        a.set_xlabel("s [m]"); a.set_ylabel(f"r_{name} [{unit}]")
+        a.legend(fontsize=7); a.grid(True, alpha=0.3)
+
+    # (1,2) 하이퍼파라미터 요약 텍스트.
+    a = ax[1, 2]
+    a.axis("off")
+    lines = [f"GP training summary  (M={cfg.M}, N={len(Z)})",
+            f"sigma_n_floor={cfg.sigma_n_floor:.1e}   jitter={cfg.jitter:.1e}",
+            f"train_experiment={cfg.train_experiment}",
+            f"final t={t[-1]:.1f}s   final s={s[-1]:.1f}m", ""]
+    for j, (name, ch) in enumerate(zip(("v_y", "gamma"), gp.channels)):
+        lines.append(f"[{name}]")
+        lines.append(f"  lengthscales (std.) = {np.array2string(ch.lengthscales, precision=3)}")
+        lines.append(f"  sigma_f={ch.sigma_f:.4f}   sigma_n={ch.sigma_n:.4f}")
+        lines.append(f"  RMS residual = {rms[j]:.4e}")
+        lines.append("")
+    a.text(0.02, 0.98, "\n".join(lines), transform=a.transAxes, va="top",
+          family="monospace", fontsize=9)
+
+    fig.suptitle(f"GP training report: {run_id}  (train_experiment={cfg.train_experiment})")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    path = out_dir / f"{run_id}_gp_training_report.png"
+    fig.savefig(path, dpi=120)
+    plt.close(fig)
+    return path
+
+
+def make_gp_calibration_band_figure(x: np.ndarray, r_true: np.ndarray, mean: np.ndarray,
+                                    var: np.ndarray, out_dir: Path, run_id: str, tag: str,
+                                    x_label: str = "t [s]") -> Path:
+    """예측분포 평균 ± 95% 구간(음영) + 실측 잔차 산점 — 고전적 GP 회귀 그림 스타일.
+
+    `r_true`/`mean`/`var`: (K, 2), 채널 순서 = (v_y, gamma) (calibration.py CHANNELS 와
+    동일). 음영은 mean ± 1.96*std(95% 예측구간). 실측 점이 음영 밖으로 자주 벗어나면
+    과신(overconfident), 음영이 실측 변동보다 훨씬 넓으면 과소신뢰(과대추정)다.
+    캘리브레이션 수치(z_std, 커버리지)는 `calibration_metrics`로 계산해 제목에 붙인다
+    (같은 정의 재사용 — 재구현 금지, eval/calibration.py 참조).
+
+    `tag`는 이 데이터가 in-sample(학습 궤적)인지 out-of-sample(평가 궤적)인지를
+    반드시 명시한다 — in-sample 은 신뢰도 증거가 아니라 적합도 진단일 뿐이다.
+    """
+    m = calibration_metrics(r_true, mean, var)
+    std = np.sqrt(var)
+    lo, hi = mean - 1.959963984540054 * std, mean + 1.959963984540054 * std
+
+    stride = max(1, len(x) // 4000)
+    idx = slice(None, None, stride)
+
+    fig, ax = plt.subplots(1, 2, figsize=(14, 5), constrained_layout=True)
+    for j, (name, unit) in enumerate([("v_y", "m/s"), ("gamma", "rad/s")]):
+        a = ax[j]
+        a.fill_between(x[idx], lo[idx, j], hi[idx, j], color="#1f77b4", alpha=0.2,
+                       label="95% predictive interval")
+        a.plot(x[idx], mean[idx, j], color="#1f77b4", lw=1.0, label="GP mean")
+        a.scatter(x[idx], r_true[idx, j], s=4, c="k", alpha=0.35, label="actual residual")
+        e = m["per_channel"][name]
+        cov95 = e["coverage"][0.95]
+        a.set_title(f"{name}: z_std={e['z_std']:.2f}  95% cov={cov95:.1%}  "
+                    f"NLPD={e['nlpd']:+.2f}")
+        a.set_xlabel(x_label); a.set_ylabel(f"r_{name} [{unit}]")
+        a.legend(fontsize=8); a.grid(True, alpha=0.3)
+
+    fig.suptitle(f"GP calibration band - {tag}: {run_id}")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    safe_tag = tag.split(" ")[0].split("(")[0].strip().replace(" ", "_") or "band"
+    path = out_dir / f"{run_id}_calibration_band_{safe_tag}.png"
     fig.savefig(path, dpi=120)
     plt.close(fig)
     return path
