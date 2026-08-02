@@ -550,6 +550,16 @@ class GpConfig:
     # NLML 이 비볼록이라 단일 시작점은 "전부 잡음" 국소최적에 빠진다 — 근거·측정은
     # `src.gp.train_offline._fit_channel` docstring. 비용은 후보 수에 비례한다.
     init_lengthscale_restarts: tuple[float, ...] = (0.3, 1.0, 3.0)
+    # 잡음 모델. "constant" = 등분산 sigma_n 하나(기본, 종전 동작).
+    # "input_dependent" = 이분산 sigma_n^2(z) 를 2차 GP 로 학습(`fit_noise_channel`).
+    # 2026-08-03 측정: 학습 분포 안에서도 잔여 산포가 6.9배 변하는데 등분산 예측은
+    # 1.0배(상수)라, 직선에서 과대·코너에서 과신이 구조적으로 강제된다.
+    noise_model: str = "constant"
+    noise_M: int = 500        # 잡음 GP 딕셔너리 크기. 평균 GP 보다 작아도 된다(더 매끄럽다)
+    # 잡음 학습 전 e^2 를 시간축으로 몇 스텝 이동평균할지. 1 이면 평활 없음.
+    # log(e^2) 한 점의 잡음 분산이 pi^2/2≈4.93 로 신호(~1.93)보다 커서, 평활 없이는
+    # 잡음 GP 가 상수로 뭉개진다 — 근거는 `train_offline.fit_noise_channel`.
+    noise_smooth_window: int = 25
     # GP 학습 데이터를 수집할 experiment 이름. 학습 궤적과 평가 궤적을 분리하기 위해
     # **config 로 고정**한다 (gp-residual.md 데이터 위생). 평가 시나리오가 바뀌어도
     # 학습 출처는 이 값 하나로 고정되므로, 평가가 나쁘다고 학습 데이터를 슬쩍 바꾸는
@@ -577,6 +587,14 @@ class GpConfig:
             raise ValueError("init_lengthscale_restarts 가 비어 있다 (최소 1개).")
         if any(v <= 0.0 for v in self.init_lengthscale_restarts):
             raise ValueError("init_lengthscale_restarts 는 전부 양수여야 한다.")
+        if self.noise_model not in ("constant", "input_dependent"):
+            raise ValueError("noise_model 은 'constant' 또는 'input_dependent' "
+                             f"(got {self.noise_model!r}).")
+        if not (isinstance(self.noise_M, int) and self.noise_M > 0):
+            raise ValueError(f"noise_M 은 양의 정수여야 한다 (got {self.noise_M!r}).")
+        if not (isinstance(self.noise_smooth_window, int) and self.noise_smooth_window >= 1):
+            raise ValueError("noise_smooth_window 는 1 이상의 정수여야 한다 "
+                             f"(got {self.noise_smooth_window!r}).")
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "GpConfig":
@@ -586,6 +604,9 @@ class GpConfig:
             lag_mode=str(d.get("lag_mode", "full")),
             init_lengthscale_restarts=tuple(
                 float(v) for v in d.get("init_lengthscale_restarts", (0.3, 1.0, 3.0))),
+            noise_model=str(d.get("noise_model", "constant")),
+            noise_M=int(d.get("noise_M", 500)),
+            noise_smooth_window=int(d.get("noise_smooth_window", 25)),
             init_lengthscale=float(d.get("init_lengthscale", 1.0)),
             init_sigma_f=float(d.get("init_sigma_f", 1.0)),
             init_sigma_n=float(d.get("init_sigma_n", 0.1)),

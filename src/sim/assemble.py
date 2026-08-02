@@ -39,9 +39,13 @@ GP_DISK_CACHE_DIR = ROOT / "data" / "gp_cache"
 #   v1: z=[v_y, gamma, delta_k]      (참값 x 기준 -> 이후 x_fb 로 교체)
 #   v2: z=[v_y, gamma, delta_{k-1}]  (2026-08-01, 배포와 정합 + n_lags 지원)
 #   v3: 학습 절차 변경 — Type-II ML 다중 재시작 (2026-08-01, 국소최적 붕괴 수정)
+#   v4: 이분산 잡음 모델의 1차 모멘트 정합 버그 수정 (2026-08-03)
+#       ★ 교훈: **코드만 바꾸고 이 상수를 안 올려서** 버그 있는 캐시본이 그대로
+#       재사용됐고, "고쳤는데 수치가 소수점까지 똑같다"는 상황이 실제로 벌어졌다.
+#       학습·특징 관련 코드를 고칠 때마다 여기를 함께 올려라.
 # (production 캐시는 GpConfig 전체를 해시하므로 재시작 후보 필드가 생긴 것만으로도
 #  자동 무효화된다. 이 상수는 config 를 안 거치는 스크립트 캐시용이다.)
-FEATURE_SPEC = "z_xfb_delta_prev_lagged_v3_mlrestart"
+FEATURE_SPEC = "z_xfb_delta_prev_lagged_v4_hetnoise_momentfix"
 
 # plant 키 -> 연속 우변 팩토리. 새 플랜트는 여기에만 추가한다.
 _PLANT_FACTORIES: dict[str, Callable] = {

@@ -219,6 +219,80 @@ def test_apply_lags_rejects_subsampled() -> None:
         apply_lags(ds.subsample(10), n_lags=1)
 
 
+# --------------------------------------------------------------------------- #
+# 이분산 잡음 모델 (2026-08-03) — sigma_n 이 입력에 따라 움직여야 한다              #
+# --------------------------------------------------------------------------- #
+def test_constant_noise_is_unchanged(sedan, gp_cfg) -> None:
+    """`noise_model="constant"`(기본)는 종전과 **완전히 동일**해야 한다.
+
+    새 기능이 기본 경로를 건드리지 않았다는 보증. 이게 깨지면 과거 결과와의 비교가
+    전부 무효가 되므로 별도 테스트로 못 박는다.
+    """
+    mpc = load_group("mpc", "default")
+    sim = replace(load_group("sim", "default"), duration=3.0)
+    path = load_group("path", "single_curve")
+    ds = collect_residual_data(sedan, mpc, sim, path, plant="nonlinear")
+    gp = train(ds, replace(gp_cfg, M=40))
+
+    assert all(ch.noise_gp is None for ch in gp.channels), "기본값에서 잡음 GP 가 붙었다"
+    # var_obs = var + sigma_n^2 (상수) 관계가 그대로여야 한다.
+    v, vo = gp.predict_var(ds.Z[:50]), gp.predict_var_obs(ds.Z[:50])
+    sn2 = np.array([ch.sigma_n**2 for ch in gp.channels]) * gp.r_scaler.scale**2
+    assert np.allclose(vo - v, sn2, rtol=1e-12)
+
+
+def test_input_dependent_noise_recovers_known_scatter(gp_cfg, tmp_path: Path) -> None:
+    """이분산 모델이 **정답을 아는 합성 데이터**에서 잡음의 변화를 복원해야 한다.
+
+    이게 이 기능의 존재 이유다. 차량 데이터가 아니라 합성 데이터를 쓰는 이유:
+    **추정기 자체를 검증**하려면 참값을 알아야 하기 때문이다. 물리 데이터로 재면
+    "산포가 진짜 그렇게 변하는가"와 "추정기가 그걸 잡아내는가"가 섞여서, 실패했을 때
+    어느 쪽이 원인인지 못 가른다(실제로 처음 이 테스트를 물리 데이터로 썼다가
+    전제가 틀려서 실패했다 — 2026-08-03).
+
+    참함수는 매끄럽고 잡음 크기만 z[0] 을 따라 0.02 -> 0.22 로 변한다.
+    """
+    rng = np.random.default_rng(0)
+    n = 3000
+    z0 = np.linspace(-3.0, 3.0, n)
+    Z = np.column_stack([z0, rng.normal(0, 0.3, n), rng.normal(0, 0.3, n)])
+    true_sd = 0.02 + 0.20 * (z0 - z0.min()) / (z0.max() - z0.min())
+    f = np.sin(z0)
+    R = np.column_stack([f + rng.normal(0, true_sd), f + rng.normal(0, true_sd)])
+    ds = ResidualDataset(Z, R, {})
+    lo, hi = z0 < -2.0, z0 > 2.0
+    true_ratio = true_sd[hi].mean() / true_sd[lo].mean()          # ~5.6
+
+    # 등분산: 어디서나 같은 sigma -> 비율 ~1.0 (변화를 통째로 뭉갠다)
+    gp_c = train(ds, replace(gp_cfg, M=300, noise_model="constant"))
+    s_c = np.sqrt(gp_c.predict_var_obs(Z))[:, 0]
+    assert abs(s_c[hi].mean() / s_c[lo].mean() - 1.0) < 0.05, "등분산인데 sigma 가 변한다"
+
+    # 이분산: 참 비율을 대략 복원해야 한다 (정확히는 아니어도 방향·자릿수는 맞아야)
+    gp_h = train(ds, replace(gp_cfg, M=300, noise_model="input_dependent", noise_M=300))
+    assert all(ch.noise_gp is not None for ch in gp_h.channels), "잡음 GP 가 안 붙었다"
+    s_h = np.sqrt(gp_h.predict_var_obs(Z))[:, 0]
+    ratio = s_h[hi].mean() / s_h[lo].mean()
+    assert ratio > 3.0, f"잡음 변화를 못 잡았다 (비율 {ratio:.2f}, 참값 {true_ratio:.2f})"
+    assert s_h[lo].mean() < 0.5 * s_c[lo].mean(), "저잡음 구간에서 여전히 과대추정"
+
+    # ★ 1차 모멘트 정합이 실제로 걸렸는지 (2026-08-03 에 여기서 버그를 냈다 —
+    #   잡음 채널에 sigma_n2_of 를 불러서 상수가 돌아왔고, 정합이 통째로 무효였다.
+    #   그 상태로 폐루프를 돌려 "이분산이 나쁘다"는 잘못된 결론을 낼 뻔했다).
+    Zs = gp_h.z_scaler.transform(Z)
+    Rs = gp_h.r_scaler.transform(R)
+    for j, ch in enumerate(gp_h.channels):
+        e2 = (Rs[:, j] - ch.mean_std(Zs))**2
+        achieved = float(np.mean(e2 / ch.sigma_n2_of(Zs)))
+        assert 0.7 < achieved < 1.4, f"채널 {j}: E[e^2/sigma_n^2]={achieved:.3f} (목표 1.0)"
+
+    # 저장·복원 후에도 같은 예측이어야 한다 (잡음 GP 가 함께 실려야 한다).
+    p = tmp_path / "gp_het.npz"
+    save_gp(p, gp_h)
+    assert np.allclose(load_gp(p).predict_var_obs(Z[:80]),
+                       gp_h.predict_var_obs(Z[:80]), atol=1e-12)
+
+
 @pytest.mark.parametrize("n_lags,lag_mode", [(0, "full"), (1, "full"), (2, "full"),
                                              (1, "delta"), (2, "delta")])
 def test_train_deploy_feature_match(sedan, gp_cfg, n_lags: int, lag_mode: str) -> None:

@@ -1,0 +1,15 @@
+# Part 1 / 케이스 2 = 학습맵 + a_y 증가 (강도 외삽) / GP 잔차 보정 — **입력의존 잡음(이분산)**.
+#
+# 기준선 `part1_gp_lpf_ay6.yaml`(gp: loop10, 등분산)과 **gp 그룹 하나만** 다르다.
+# 나머지는 전부 동일 — 잡음 모델의 효과만 분리하기 위한 통제
+# (sim-experiment.md 「통제해야 할 변수」). 근거는 `configs/gp/loop10_het.yaml`.
+vehicle: sedan
+sim: loop10
+path: loop10
+mpc: default
+gp: loop10_het
+plant: nonlinear
+sensor: realistic
+state_kf: default
+overrides:
+  path.a_y_max: 6.0
