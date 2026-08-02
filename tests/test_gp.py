@@ -24,7 +24,7 @@ from src.control.mpc_gp import GPStepModel
 from src.gp.casadi_export import build_mu_function, gp_param_vector
 from src.gp.dataset import (BASE_DIM, ResidualDataset, apply_lags, collect_residual_data,
                             lagged_dim, lap_block_split)
-from src.gp.train_offline import load_gp, save_gp, train
+from src.gp.train_offline import InputWarp, load_gp, save_gp, train
 from src.models.nonlinear_bicycle import make_nonlinear_rhs_np
 from src.path.reference import Reference
 from src.sim.runner import run_closed_loop
@@ -217,6 +217,66 @@ def test_apply_lags_rejects_subsampled() -> None:
     ds = ResidualDataset(np.zeros((100, BASE_DIM)), np.zeros((100, 2)))
     with pytest.raises(ValueError, match="시간순 연속"):
         apply_lags(ds.subsample(10), n_lags=1)
+
+
+# --------------------------------------------------------------------------- #
+# 입력 워핑 (2026-08-03) — 학습 범위 밖에서 Var[f*] 가 자라야 한다                  #
+# --------------------------------------------------------------------------- #
+def test_warp_is_identity_inside_range() -> None:
+    """워핑은 학습 범위 **안에서는 항등**이어야 한다 (학습 영역 적합을 바꾸면 안 된다)."""
+    Zs = np.random.default_rng(0).normal(size=(500, 3))
+    w = InputWarp.fit(Zs, factor=4.0, q=1.0)
+    inside = np.clip(Zs, w.lo, w.hi)
+    assert np.allclose(w.apply(inside), inside), "범위 안에서 항등이 아니다"
+    # 밖에서는 정확히 factor 배로 벌어져야 한다 (단조·연속).
+    far = w.hi + 2.0
+    assert np.allclose(w.apply(far[None, :]) - w.hi, 2.0 * 4.0)
+
+
+def test_warp_grows_variance_outside(sedan, gp_cfg) -> None:
+    """워핑을 켜면 학습 범위 밖에서 Var[f*] 가 **더 빨리** 자라야 한다.
+
+    이게 이 기능의 존재 이유다 — 정상 커널은 lengthscale 하나로 "매끄러움"과
+    "얼마나 멀어야 모른다고 할지"를 동시에 정해서, 매끄러운 함수에서는 멀리까지
+    자신만만해진다(rtf_ay6 에서 v_y 가 학습범위 밖 38.6% 인데 ARD 거리 중앙값 0.96).
+
+    커널(하이퍼파라미터·딕셔너리)을 **고정**하고 워핑만 켜고 끈다. 두 GP 를 각각
+    학습시켜 비교하면 워핑 효과와 재학습 변동이 섞여서 메커니즘을 못 가른다
+    (처음에 그렇게 짰다가 실패했다 — 2026-08-03).
+    """
+    import copy
+
+    mpc = load_group("mpc", "default")
+    sim = replace(load_group("sim", "default"), duration=6.0)
+    path = load_group("path", "single_curve")
+    ds = collect_residual_data(sedan, mpc, sim, path, plant="nonlinear")
+
+    gp0 = train(ds, replace(gp_cfg, M=60, warp_factor=1.0))
+    assert gp0.warp is None
+    gpw = copy.deepcopy(gp0)
+    gpw.warp = InputWarp.fit(gp0.z_scaler.transform(ds.Z), factor=4.0, q=1.0)
+
+    # 학습 범위 안: 워핑이 항등이므로 분산이 (거의) 같아야 한다.
+    v0_in, vw_in = gp0.predict_var(ds.Z), gpw.predict_var(ds.Z)
+    same = np.mean(np.isclose(v0_in, vw_in, rtol=1e-9))
+    assert same > 0.9, f"범위 안에서 분산이 달라졌다 (동일 비율 {same:.1%})"
+
+    # 범위 밖 거리대를 훑는다. 너무 멀면 둘 다 천장에 붙어버려 차이가 안 보이므로
+    # **실제 OOD 거리대**(범위를 살짝 벗어난 곳)에서 확인해야 한다.
+    m, s = ds.Z.mean(0), ds.Z.std(0)
+    gains = []
+    for t in (1.5, 2.0, 2.5, 3.0, 3.5):
+        v0, vw = gp0.predict_var(m + t * s)[0], gpw.predict_var(m + t * s)[0]
+        assert np.all(vw >= v0 - 1e-18), f"t={t}: 워핑인데 분산이 줄었다 {v0} -> {vw}"
+        gains.append(np.max(vw / np.maximum(v0, 1e-300)))
+    assert max(gains) > 1.05, f"어느 거리에서도 분산이 안 커진다 (최대 배율 {max(gains):.3f})"
+
+    # 저장·복원 후 동일 (워핑 파라미터가 함께 실려야 한다).
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        p = Path(td) / "gp_warp.npz"
+        save_gp(p, gpw)
+        assert np.allclose(load_gp(p).predict_var(ds.Z[:50]), gpw.predict_var(ds.Z[:50]))
 
 
 # --------------------------------------------------------------------------- #

@@ -560,6 +560,12 @@ class GpConfig:
     # log(e^2) 한 점의 잡음 분산이 pi^2/2≈4.93 로 신호(~1.93)보다 커서, 평활 없이는
     # 잡음 GP 가 상수로 뭉개진다 — 근거는 `train_offline.fit_noise_channel`.
     noise_smooth_window: int = 25
+    # 입력 워핑 — 학습 범위 **밖**에서만 거리를 factor 배로 늘려 Var[f*] 가 자라게 한다.
+    # 1.0 = 워핑 없음(기본, 종전 동작). 근거는 `train_offline.InputWarp`.
+    # ★ factor 는 학습 데이터로 정할 수 없는 **사전 가정**이다. 평가 지표를 보고
+    #   고르면 분식이다 — `scripts/tune_input_warp.py` 의 내부 OOD 분할로 정하라.
+    warp_factor: float = 1.0
+    warp_quantile: float = 1.0   # 학습 범위를 잡는 분위(%). 1.0 이면 [1%, 99%]
     # GP 학습 데이터를 수집할 experiment 이름. 학습 궤적과 평가 궤적을 분리하기 위해
     # **config 로 고정**한다 (gp-residual.md 데이터 위생). 평가 시나리오가 바뀌어도
     # 학습 출처는 이 값 하나로 고정되므로, 평가가 나쁘다고 학습 데이터를 슬쩍 바꾸는
@@ -595,6 +601,12 @@ class GpConfig:
         if not (isinstance(self.noise_smooth_window, int) and self.noise_smooth_window >= 1):
             raise ValueError("noise_smooth_window 는 1 이상의 정수여야 한다 "
                              f"(got {self.noise_smooth_window!r}).")
+        if not (self.warp_factor >= 1.0):
+            raise ValueError("warp_factor 는 1.0 이상이어야 한다 (1.0 = 워핑 없음). "
+                             f"1 미만이면 범위 밖에서 오히려 더 자신만만해진다 "
+                             f"(got {self.warp_factor!r}).")
+        if not (0.0 <= self.warp_quantile < 50.0):
+            raise ValueError(f"warp_quantile 은 [0, 50) 이어야 한다 (got {self.warp_quantile!r}).")
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "GpConfig":
@@ -607,6 +619,8 @@ class GpConfig:
             noise_model=str(d.get("noise_model", "constant")),
             noise_M=int(d.get("noise_M", 500)),
             noise_smooth_window=int(d.get("noise_smooth_window", 25)),
+            warp_factor=float(d.get("warp_factor", 1.0)),
+            warp_quantile=float(d.get("warp_quantile", 1.0)),
             init_lengthscale=float(d.get("init_lengthscale", 1.0)),
             init_sigma_f=float(d.get("init_sigma_f", 1.0)),
             init_sigma_n=float(d.get("init_sigma_n", 0.1)),

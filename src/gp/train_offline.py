@@ -22,6 +22,58 @@ from src.gp.kernels import ard_rbf_np
 
 
 @dataclass
+class InputWarp:
+    """학습 범위 **밖**에서 거리가 빨리 자라게 하는 단조 입력 변환 (비정상 커널).
+
+    표준화 공간에서 차원마다 학습 데이터의 [lo, hi] 구간을 그대로 두고, 그 **밖에서만**
+    `factor` 배로 늘린다:
+
+        w(z) = z                            (lo <= z <= hi)
+             = lo + (z - lo) * factor       (z < lo)
+             = hi + (z - hi) * factor       (z > hi)
+
+    ## 왜 필요한가 (2026-08-03 측정)
+
+    정상(stationary) 커널은 **lengthscale 하나가 두 가지를 동시에** 결정한다 —
+    "함수가 얼마나 매끄러운가"와 "얼마나 멀어져야 모른다고 할 것인가". 평균함수가
+    매끄러워 lengthscale 이 길게 잡히면 GP 는 "멀리까지 자신 있게 외삽할 수 있다"고
+    말한다. 실제로 rtf_ay6 에서:
+
+        v_y 가 학습 범위(1~99%) 밖으로 나가는 비율 = 38.6%
+        그런데 ARD 최근접거리 중앙값 = 0.96 (3 이상이어야 '멀다'로 인식)
+        -> Var[f*] 가 천장의 25% 에 머물고 z_std=3.26 으로 과신
+
+    워핑은 **범위 안에서는 항등**이라 학습 영역의 적합을 바꾸지 않고, 밖에서만
+    거리를 늘려 `Var[f*]` 가 자라게 한다. 정상 커널을 단조 변환과 합성한 것이므로
+    **여전히 유효한(PSD) 커널**이다 (Sampson & Guttorp 계열 deformation).
+
+    ## ★ factor 는 학습 데이터로 정할 수 없다 — 정직하게 적어둔다
+
+    "범위 밖에서 얼마나 틀릴지"는 범위 안의 데이터가 알려줄 수 없다. 이건 학습이
+    아니라 **사전 가정**이다. 그래서 `scripts/tune_input_warp.py` 는 **학습맵 안에서
+    가장 험한 코너를 빼고 그걸로 검증**해 정한다 — 강도 외삽 구조를 재현하면서
+    평가 시나리오(racetrack, a_y=6)는 건드리지 않는다.
+    **평가 지표를 보고 factor 를 고르면 분식이다.**
+    """
+    lo: np.ndarray           # (d,) 표준화 공간 하한
+    hi: np.ndarray           # (d,) 표준화 공간 상한
+    factor: float            # 범위 밖 확대 배율 (1.0 = 워핑 없음)
+
+    def apply(self, z_std: np.ndarray) -> np.ndarray:
+        z = np.atleast_2d(np.asarray(z_std, float))
+        below = np.minimum(z - self.lo, 0.0)      # 하한 아래로 벗어난 양 (<=0)
+        above = np.maximum(z - self.hi, 0.0)      # 상한 위로 벗어난 양 (>=0)
+        inside = np.clip(z, self.lo, self.hi)
+        return inside + (below + above) * self.factor
+
+    @classmethod
+    def fit(cls, Zs: np.ndarray, factor: float, q: float = 1.0) -> "InputWarp":
+        """딕셔너리에서 차원별 [q, 100-q] 분위로 학습 범위를 잡는다."""
+        return cls(lo=np.percentile(Zs, q, axis=0),
+                   hi=np.percentile(Zs, 100.0 - q, axis=0), factor=float(factor))
+
+
+@dataclass
 class GpChannel:
     """단일 채널 exact GP (표준화 공간). 예측 평균·분산 제공.
 
@@ -284,15 +336,21 @@ class TwoChannelGP:
     channels: list[GpChannel]   # [v_y, gamma]
     n_lags: int = 0
     lag_mode: str = "full"
+    warp: InputWarp | None = None   # 학습 범위 밖 거리 확대 (비정상 커널)
 
     @property
     def input_dim(self) -> int:
         """특징 z 의 차원 = 3 * (n_lags + 1). 딕셔너리에서 직접 읽는다."""
         return int(self.channels[0].Z.shape[1])
 
+    def _zs(self, z: np.ndarray) -> np.ndarray:
+        """실단위 z -> 표준화(+워핑). **모든 예측이 이 함수를 거쳐야** 학습과 일치한다."""
+        zs = self.z_scaler.transform(z)
+        return zs if self.warp is None else self.warp.apply(zs)
+
     def predict_mean(self, z: np.ndarray) -> np.ndarray:
         """실단위 잔차 평균 예측. z:(n,3) -> (n,2)."""
-        zs = self.z_scaler.transform(z)
+        zs = self._zs(z)
         mstd = np.column_stack([ch.mean_std(zs) for ch in self.channels])  # (n,2) 표준화
         return self.r_scaler.inverse(mstd)
 
@@ -301,7 +359,7 @@ class TwoChannelGP:
 
         **불확실성 지도(epistemic)용**이다. 캘리브레이션에는 `predict_var_obs` 를 써라.
         """
-        zs = self.z_scaler.transform(z)
+        zs = self._zs(z)
         vstd = np.column_stack([ch.var_std(zs) for ch in self.channels])   # (n,2)
         return vstd * (self.r_scaler.scale**2)
 
@@ -310,7 +368,7 @@ class TwoChannelGP:
 
         **캘리브레이션용**이다 (비교 대상이 관측된 잔차이므로).
         """
-        zs = self.z_scaler.transform(z)
+        zs = self._zs(z)
         vstd = np.column_stack([ch.var_obs_std(zs) for ch in self.channels])
         return vstd * (self.r_scaler.scale**2)
 
@@ -328,6 +386,12 @@ def train(dataset: ResidualDataset, cfg: GpConfig) -> TwoChannelGP:
     z_scaler = Standardizer.fit(dict_ds.Z)
     r_scaler = Standardizer.fit(dict_ds.R)
     Zs = z_scaler.transform(dict_ds.Z)
+    # 워핑은 학습 범위 **안에서 항등**이므로 딕셔너리에는 거의 영향이 없다(경계
+    # 1% 꼬리만 이동). 그래도 학습·예측이 **같은 공간**을 쓰도록 여기서 적용한다.
+    warp = (InputWarp.fit(Zs, cfg.warp_factor, cfg.warp_quantile)
+            if cfg.warp_factor != 1.0 else None)
+    if warp is not None:
+        Zs = warp.apply(Zs)
     Rs = r_scaler.transform(dict_ds.R)
     channels = [_fit_channel(Zs, Rs[:, j], cfg) for j in range(Rs.shape[1])]
 
@@ -337,13 +401,15 @@ def train(dataset: ResidualDataset, cfg: GpConfig) -> TwoChannelGP:
         # GP 가 거의 보간해버려 산포가 실제보다 작게 나온다(딕셔너리 밖의 진짜
         # 산포를 재야 한다. 2026-07-31 의 "M=100 부분표본" 진단과 같은 함정).
         Zs_full = z_scaler.transform(dataset.Z)
+        if warp is not None:
+            Zs_full = warp.apply(Zs_full)
         Rs_full = r_scaler.transform(dataset.R)
         for j, ch in enumerate(channels):
             resid = Rs_full[:, j] - ch.mean_std(Zs_full)
             ch.noise_gp = fit_noise_channel(Zs_full, resid, cfg)
 
     return TwoChannelGP(z_scaler=z_scaler, r_scaler=r_scaler, channels=channels,
-                        n_lags=cfg.n_lags, lag_mode=cfg.lag_mode)
+                        n_lags=cfg.n_lags, lag_mode=cfg.lag_mode, warp=warp)
 
 
 def save_gp(path: Path, gp: TwoChannelGP) -> Path:
@@ -363,6 +429,9 @@ def save_gp(path: Path, gp: TwoChannelGP) -> Path:
             d[f"nsf{j}"] = g.sigma_f; d[f"nsn{j}"] = g.sigma_n
             d[f"nalpha{j}"] = g.alpha; d[f"nW{j}"] = g.W
             d[f"npm{j}"] = g.prior_mean
+    if gp.warp is not None:      # 입력 워핑 (있을 때만)
+        d["warp_lo"] = gp.warp.lo; d["warp_hi"] = gp.warp.hi
+        d["warp_factor"] = gp.warp.factor
     np.savez(path, n_channels=len(gp.channels), n_lags=gp.n_lags,
              lag_mode=gp.lag_mode, **d)
     return path
@@ -387,5 +456,8 @@ def load_gp(path: Path) -> TwoChannelGP:
     # n_lags/lag_mode 는 이 필드가 생기기 전(2026-08-01) 저장본에 없다 -> 기본값 (하위호환).
     n_lags = int(d["n_lags"]) if "n_lags" in d.files else 0
     lag_mode = str(d["lag_mode"]) if "lag_mode" in d.files else "full"
+    # 워핑도 이 필드가 생기기 전 저장본에 없다 -> None (하위호환).
+    warp = (InputWarp(lo=d["warp_lo"], hi=d["warp_hi"], factor=float(d["warp_factor"]))
+            if "warp_lo" in d.files else None)
     return TwoChannelGP(z_scaler=zc, r_scaler=rc, channels=channels,
-                        n_lags=n_lags, lag_mode=lag_mode)
+                        n_lags=n_lags, lag_mode=lag_mode, warp=warp)

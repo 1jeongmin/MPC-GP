@@ -1,0 +1,15 @@
+# Part 1 / 학습맵 loop10 + 잡음 + 필터 / 케이스 = mpc_only / **예측 지평 N=60**.
+#
+# 호라이즌 재측정 전용(2026-08-03). 기준선 `part1_mpc_only_lpf_ay4.yaml`(N=50)과
+# **mpc 그룹 하나만** 다르다(`configs/mpc/hN60.yaml` = default 에서 N/u_blocks 만 변경).
+#
+# GP 를 빼고(mpc_only) 재는 이유: GP 학습 변동이 섞이면 지평의 효과만 분리할 수 없다.
+# 종전 측정(2026-07-30)은 N=30->60 에서 추종이 세 경로 모두 악화한다고 기록했으나
+# 그 뒤 정식화가 바뀌어(입력 블로킹·warm start) 재측정한다.
+vehicle: sedan
+sim: loop10
+path: loop10
+mpc: hN60
+plant: nonlinear
+sensor: realistic
+state_kf: default
