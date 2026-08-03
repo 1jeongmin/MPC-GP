@@ -56,14 +56,15 @@ from src.eval.calibration import calibration_metrics
 from src.gp.dataset import ResidualDataset, lap_block_split, load_dataset, save_dataset
 from src.gp.train_offline import load_gp, save_gp, train
 from src.path.reference import Reference
-from src.sim.assemble import FEATURE_SPEC, collect_training_dataset
+from src.sim.assemble import GP_TRAIN_CODE_ID, collect_training_dataset
 
 DEFAULT_MS = (100, 250, 500, 1000, 2000, 4000)
 EVAL_EXPERIMENT = "part1_gp_lpf_ay4"      # in-distribution. 여기서 gp 그룹을 가져온다.
 N_EVAL = 4000                              # 홀드아웃 평가 표본 수 (분산이 O(n*M^2))
-# 캐시 파일명에 특징 규약을 박는다 — 규약이 바뀌면 옛 캐시를 **재사용할 수 없게**
-# 이름이 갈린다(production 캐시가 해시로 하는 일과 같은 목적, assemble.FEATURE_SPEC).
-CACHE = ROOT / "data" / "gp_cache" / f"tune_gp_M_{FEATURE_SPEC}_dataset.npz"
+# 캐시 파일명에 학습 코드 신원을 박는다 — 특징 규약이든 학습 코드든 바뀌면 옛 캐시를
+# **재사용할 수 없게** 이름이 갈린다(production 캐시가 해시로 하는 일과 같은 목적,
+# assemble.GP_TRAIN_CODE_ID = 라벨 + src/gp 코드 해시).
+CACHE = ROOT / "data" / "gp_cache" / f"tune_gp_M_{GP_TRAIN_CODE_ID}_dataset.npz"
 
 
 def get_dataset() -> tuple[ResidualDataset, float]:
@@ -122,7 +123,7 @@ def main() -> None:
         cfg = replace(base_gp_cfg, M=M)
         # 학습된 GP 를 M 별로 캐시한다 — M=4000 은 학습만 40분이라 재평가 때마다
         # 다시 돌릴 수 없다. 데이터셋·M 이 같으면 train() 은 결정론적이다.
-        gp_cache = CACHE.with_name(f"tune_gp_M_{FEATURE_SPEC}_model_M{M}.npz")
+        gp_cache = CACHE.with_name(f"tune_gp_M_{GP_TRAIN_CODE_ID}_model_M{M}.npz")
         if gp_cache.exists():
             gp, train_s = load_gp(gp_cache), float("nan")
         else:
@@ -152,7 +153,7 @@ def main() -> None:
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(
         {"n_data": len(ds), "candidates": list(Ms), "n_eval": N_EVAL,
-         "eval_experiment": EVAL_EXPERIMENT, "feature_spec": FEATURE_SPEC,
+         "eval_experiment": EVAL_EXPERIMENT, "feature_spec": GP_TRAIN_CODE_ID,
          "split": "lap_block(holdout=last lap)", "n_fit": len(fit_ds),
          "n_holdout": len(held), "rows": rows,
          "best_by_nlpd": best["M"], "diminishing_returns": frugal["M"]},

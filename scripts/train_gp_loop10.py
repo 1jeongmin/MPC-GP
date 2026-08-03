@@ -38,6 +38,7 @@ from src.models.integrators import make_rhs_np
 from src.estimation.state_estimator import make_state_kf
 from src.models.nonlinear_bicycle import make_nonlinear_rhs_np
 from src.path.reference import Reference
+from src.sim.assemble import GP_TRAIN_CODE_ID
 from src.sim.logger import write_run_meta
 from src.sim.runner import run_closed_loop
 from src.sim.sensor import make_sensor
@@ -79,9 +80,13 @@ def main() -> None:
     print(f"[검증] 제어스텝={n_steps}  최종 t={log['t'][-1]:.2f} s  "
           f"최종 s={max_s:.3f} m (목표 {target_s:.3f} m, 차이 {max_s - target_s:+.3f} m)")
 
-    # 특징은 **x_fb**(제어기가 실제로 받는 상태)에서 뽑는다 — 배포에서 GP 가 보는 것과
-    # 같아야 한다 (src/gp/dataset.py 의 collect_residual_data 와 동일 규약).
-    Z = np.column_stack([log["x_fb"][:, 0], log["x_fb"][:, 1], log["delta"]])
+    # 특징은 **x_fb**(제어기가 실제로 받는 상태) + **delta_{k-1}** 에서 뽑는다 — 배포에서
+    # GP 가 보는 것과 같아야 한다 (src/gp/dataset.py 의 collect_residual_data 와 동일 규약).
+    # ★ 2026-08-03 수정: 여기서 `log["delta"]`(=delta_k, 적용된 입력)를 쓰고 있었다.
+    # 배포는 solve **전**에 GP 를 평가하므로 delta_k 를 알 수 없어 u_prev 를 쓴다 —
+    # 2026-08-01 에 production 경로(dataset.py)만 고치고 이 기록용 스크립트를 빠뜨려서,
+    # 여기 남는 학습 기록이 **실제 배포된 GP 와 다른 GP** 였다.
+    Z = np.column_stack([log["x_fb"][:, 0], log["x_fb"][:, 1], log["delta_prev"]])
     R = log["residual"][:, 0:2]                                            # r_vy, r_gamma
     ds = ResidualDataset(Z, R, meta={"plant": tr.plant, "n": Z.shape[0], "seed": tr.sim.seed,
                                      "filtered_features": state_est is not None,
@@ -105,6 +110,10 @@ def main() -> None:
     write_run_meta(
         out_dir, run_id, tr.to_snapshot(), tr.sim.seed,
         extra={
+            # 이 기록이 어떤 **학습 코드**에서 나왔는지. 평가 런의 meta.json 에 찍히는
+            # 같은 값과 대조하면 "이 기록이 그 GP 와 같은 코드인가"를 확인할 수 있다
+            # (2026-08-03, assemble.GP_TRAIN_CODE_ID). git hash 는 dirty 면 무력하다.
+            "gp_train_code_id": GP_TRAIN_CODE_ID,
             "gp_config": {"M": gp_cfg.M, "sigma_n_floor": gp_cfg.sigma_n_floor,
                           "init_lengthscale": gp_cfg.init_lengthscale,
                           "init_sigma_f": gp_cfg.init_sigma_f,

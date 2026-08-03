@@ -68,9 +68,15 @@ def run_experiment(exp_name: str, tag: str = "", out_dir: Path | None = None) ->
     run_id = (tag or exp_name) + "_" + datetime.now().strftime("%Y%m%d_%H%M%S")
     out_dir = out_dir or (ROOT / "results" / run_id)
     save_npz(out_dir, log)
-    write_run_meta(out_dir, run_id, exp.to_snapshot(), exp.sim.seed,
-                   extra={"metrics": metrics, "calibration": calib,
-                          "case": case.name, "plant": exp.plant})
+    # gp_train_code_id: 이 런이 어떤 **학습 코드**로 만든 GP 를 썼는지. git hash 는
+    # dirty 면 코드를 특정하지 못하므로, 학습 경로만이라도 내용 해시로 남긴다
+    # (2026-08-03, assemble.GP_TRAIN_CODE_ID). GP 를 안 쓰는 케이스는 기록하지 않는다.
+    extra = {"metrics": metrics, "calibration": calib,
+             "case": case.name, "plant": exp.plant}
+    if exp.gp is not None:
+        from src.sim.assemble import GP_TRAIN_CODE_ID
+        extra["gp_train_code_id"] = GP_TRAIN_CODE_ID
+    write_run_meta(out_dir, run_id, exp.to_snapshot(), exp.sim.seed, extra=extra)
     make_report_figure(log, case.reference, exp.vehicle, exp.sim.dt_ctrl, out_dir,
                        run_id, tag=tag or exp_name)
 

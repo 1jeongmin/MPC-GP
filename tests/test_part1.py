@@ -77,6 +77,73 @@ def test_case_builder_dispatch() -> None:
     assert only.gp is None and only.ekf is None
 
 
+# --------------------------------------------------------------------------- #
+# GP 디스크 캐시가 **코드 변경**을 감지하는지 (2026-08-03)                        #
+#                                                                             #
+# 배경: 캐시 키가 config 만 해시하던 시절, 이분산 잡음 버그를 고쳤는데도 옛 캐시본이  #
+# 재사용돼 "고쳤는데 수치가 소수점까지 똑같다"는 사고가 있었다. 수동으로 FEATURE_SPEC  #
+# 을 올리는 규율에 의존하던 것을 코드 해시로 자동화했고, 아래가 그 회귀 테스트다.      #
+# --------------------------------------------------------------------------- #
+def test_gp_code_digest_changes_when_training_source_changes(tmp_path: Path) -> None:
+    """`src/gp/` 학습 소스가 1바이트라도 바뀌면 해시가 달라져야 한다.
+
+    저장소 파일을 실제로 건드리지 않도록 `assemble.ROOT` 를 사본 트리로 돌려놓고 본다.
+    """
+    import shutil
+
+    from src.sim import assemble
+
+    gp_dir = tmp_path / "src" / "gp"
+    gp_dir.mkdir(parents=True)
+    for name in assemble._GP_TRAIN_SOURCES:
+        shutil.copy(ROOT / "src" / "gp" / name, gp_dir / name)
+
+    orig_root = assemble.ROOT
+    try:
+        assemble.ROOT = tmp_path
+        before = assemble._gp_code_digest()
+        assert before == assemble._gp_code_digest(), "같은 내용이면 해시가 안정해야 한다."
+
+        target = gp_dir / "train_offline.py"
+        target.write_bytes(target.read_bytes() + b"\n# simulated training-code edit\n")
+        after = assemble._gp_code_digest()
+    finally:
+        assemble.ROOT = orig_root
+
+    assert before != after, (
+        "학습 코드가 바뀌었는데 해시가 같다 — 옛 캐시본이 조용히 재사용된다.")
+
+
+def test_gp_cache_path_includes_code_identity() -> None:
+    """캐시 경로가 `GP_TRAIN_CODE_ID` 에 실제로 의존하는지 (해시에 안 들어가면 무용)."""
+    from src.sim import assemble
+
+    exp = load_experiment(experiment_name("gp", "ay4"))
+    tr = load_experiment(exp.gp.train_experiment)
+    p_before = assemble._gp_disk_cache_path(exp, tr)
+
+    orig = assemble.GP_TRAIN_CODE_ID
+    try:
+        assemble.GP_TRAIN_CODE_ID = orig + "_다른코드"
+        p_after = assemble._gp_disk_cache_path(exp, tr)
+    finally:
+        assemble.GP_TRAIN_CODE_ID = orig
+
+    assert p_before != p_after, "코드 신원이 캐시 키에 반영되지 않는다."
+
+
+def test_gp_train_sources_exist() -> None:
+    """해시 대상 파일이 이름이 바뀌거나 사라지면 즉시 실패해야 한다.
+
+    `read_bytes` 가 조용히 실패하는 일은 없지만(예외가 난다), 파일을 옮기고 목록을
+    갱신하지 않으면 학습 코드가 해시에서 빠지는 것과 같으므로 명시적으로 걸어둔다.
+    """
+    from src.sim import assemble
+
+    for name in assemble._GP_TRAIN_SOURCES:
+        assert (ROOT / "src" / "gp" / name).exists(), name
+
+
 def test_gp_train_experiment_is_separate() -> None:
     """GP 학습 출처가 config 로 고정되어 있고, 순환 참조가 아닌지."""
     gp_cfg = load_group("gp", "default")

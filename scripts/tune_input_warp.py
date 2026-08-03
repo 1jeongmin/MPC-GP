@@ -46,10 +46,13 @@ from src.config import load_experiment
 from src.eval.calibration import calibration_metrics
 from src.gp.dataset import ResidualDataset, load_dataset
 from src.gp.train_offline import train
-from src.sim.assemble import FEATURE_SPEC
+from src.sim.assemble import GP_TRAIN_CODE_ID
 
 EVAL_EXPERIMENT = "part1_gp_lpf_ay4"     # gp 그룹(M, 하이퍼파라미터)을 여기서 가져온다
-DS_CACHE = ROOT / "data" / "gp_cache" / "compare_features_dataset.npz"
+# 파일명에 학습 코드 신원을 박는다 — `compare_gp_features.py` 가 같은 이름으로 만든다
+# (두 스크립트가 같은 데이터셋을 공유한다). 학습 코드가 바뀌면 이름이 갈려 옛 캐시를
+# 재사용할 수 없다 (assemble.GP_TRAIN_CODE_ID).
+DS_CACHE = ROOT / "data" / "gp_cache" / f"compare_features_{GP_TRAIN_CODE_ID}_dataset.npz"
 DEFAULT_FACTORS = (1.0, 2.0, 4.0, 8.0)
 SPLIT_Q = 80.0                            # 하위 80% 로 학습, 상위 20% 로 검증
 N_EVAL = 4000
@@ -114,7 +117,7 @@ def main() -> None:
         "tune_input_warp_" + datetime.now().strftime("%Y%m%d_%H%M%S") + ".json")
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(
-        {"feature_spec": FEATURE_SPEC, "split": f"severity |gamma| q={SPLIT_Q}",
+        {"feature_spec": GP_TRAIN_CODE_ID, "split": f"severity |gamma| q={SPLIT_Q}",
          "n_fit": len(fit_ds), "n_held": len(held), "n_eval": int(len(idx)),
          "eval_experiment": EVAL_EXPERIMENT, "rows": rows,
          "best_by_nlpd": best["factor"]},

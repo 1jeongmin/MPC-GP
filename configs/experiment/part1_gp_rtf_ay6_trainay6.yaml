@@ -1,0 +1,16 @@
+# Part 1 / 케이스 4 = racetrack + a_y 증가 (형상+강도) / GP 잔차 보정 — **ay6 학습본**.
+#
+# 기준선 `part1_gp_rtf_ay6.yaml`(gp: loop10)과 **gp 그룹 하나만** 다르다.
+# ay6 학습본에게는 강도가 학습과 같으므로 **형상 외삽만** 남는다 — ay4 학습본에서
+# 무너졌던(z_std 2.91/커버 54.2%) 바로 그 시나리오에서 강도축을 제거하면 어디까지
+# 회복되는지 보는 자리다. 두 축을 분리하는 핵심 대조군.
+vehicle: sedan
+sim: racetrack
+path: racetrack
+mpc: default
+gp: loop10_ay6
+plant: nonlinear
+sensor: realistic
+state_kf: default
+overrides:
+  path.a_y_max: 6.0

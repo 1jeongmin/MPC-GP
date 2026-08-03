@@ -1,0 +1,13 @@
+# Part 1 / 케이스 1 = loop10 학습맵 그대로 / GP 잔차 보정 — **ay6 학습본**.
+#
+# 기준선 `part1_gp_lpf_ay4.yaml`(gp: loop10)과 **gp 그룹 하나만** 다르다.
+# 이 조합은 형상 동일 + 강도가 학습(6.0)보다 **낮은** 쪽 = 강도축 **내삽**.
+# 근거는 `configs/experiment/gp_train_loop10_ay6.yaml`.
+vehicle: sedan
+sim: loop10
+path: loop10
+mpc: default
+gp: loop10_ay6
+plant: nonlinear
+sensor: realistic
+state_kf: default

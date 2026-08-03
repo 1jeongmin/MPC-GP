@@ -1,0 +1,15 @@
+# Part 1 / 케이스 2 = loop10 학습맵 + a_y 증가 / GP 잔차 보정 — **ay6 학습본**.
+#
+# 기준선 `part1_gp_lpf_ay6.yaml`(gp: loop10)과 **gp 그룹 하나만** 다르다.
+# ay6 학습본에게는 이 조합이 **in-distribution**(형상·강도 모두 학습과 같음)이다.
+# ay4 학습본의 케이스 1(lpf_ay4)에 대응하는 자리 — 두 학습본의 "제 집" 성능 비교용.
+vehicle: sedan
+sim: loop10
+path: loop10
+mpc: default
+gp: loop10_ay6
+plant: nonlinear
+sensor: realistic
+state_kf: default
+overrides:
+  path.a_y_max: 6.0

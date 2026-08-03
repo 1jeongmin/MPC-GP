@@ -1,0 +1,16 @@
+# Part 1 / 케이스 3 = racetrack (형상 외삽) / GP 잔차 보정 — **ay6 학습본**.
+#
+# ★ 사용자가 직접 요청한 조합 (2026-08-03): **학습 강도를 올리고 낮은 강도에서 평가**.
+# 기준선 `part1_gp_rtf_ay4.yaml`(gp: loop10)과 **gp 그룹 하나만** 다르다.
+#
+# 형상은 외삽(racetrack), 강도는 학습(6.0)보다 낮으므로 **내삽**이다. ay4 학습본의
+# 케이스 4(rtf_ay6, 형상+강도 외삽, z_std 2.91/커버 54.2%)와 방향이 정반대인 자리다.
+# 근거는 `configs/experiment/gp_train_loop10_ay6.yaml`.
+vehicle: sedan
+sim: racetrack
+path: racetrack
+mpc: default
+gp: loop10_ay6
+plant: nonlinear
+sensor: realistic
+state_kf: default

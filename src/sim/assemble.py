@@ -33,19 +33,51 @@ from src.path.reference import Reference
 ROOT = Path(__file__).resolve().parents[2]
 GP_DISK_CACHE_DIR = ROOT / "data" / "gp_cache"
 
-# GP 학습 특징의 **코드상** 규약 식별자. 디스크 캐시 해시에 들어간다.
-# 특징 정의를 바꿀 때마다 올려라 — 안 올리면 config 가 같다는 이유로 옛 캐시가
-# 조용히 재사용된다 (`_gp_disk_cache_path` 참조).
+# GP 학습 특징의 **코드상** 규약 식별자 — 사람이 읽는 라벨이다.
 #   v1: z=[v_y, gamma, delta_k]      (참값 x 기준 -> 이후 x_fb 로 교체)
 #   v2: z=[v_y, gamma, delta_{k-1}]  (2026-08-01, 배포와 정합 + n_lags 지원)
 #   v3: 학습 절차 변경 — Type-II ML 다중 재시작 (2026-08-01, 국소최적 붕괴 수정)
 #   v4: 이분산 잡음 모델의 1차 모멘트 정합 버그 수정 (2026-08-03)
-#       ★ 교훈: **코드만 바꾸고 이 상수를 안 올려서** 버그 있는 캐시본이 그대로
+#       ★ 이때 **코드만 바꾸고 이 상수를 안 올려서** 버그 있는 캐시본이 그대로
 #       재사용됐고, "고쳤는데 수치가 소수점까지 똑같다"는 상황이 실제로 벌어졌다.
-#       학습·특징 관련 코드를 고칠 때마다 여기를 함께 올려라.
-# (production 캐시는 GpConfig 전체를 해시하므로 재시작 후보 필드가 생긴 것만으로도
-#  자동 무효화된다. 이 상수는 config 를 안 거치는 스크립트 캐시용이다.)
+#       -> 그 수동 규율을 아래 `_gp_code_digest()` 로 자동화했다 (2026-08-03).
+# 이제 캐시 무효화는 이 상수에 의존하지 않는다. 그래도 사람이 캐시 파일명을 보고
+# 어느 규약인지 알 수 있어야 하므로 라벨로는 유지한다.
 FEATURE_SPEC = "z_xfb_delta_prev_lagged_v4_hetnoise_momentfix"
+
+# 캐시된 GP 를 **실제로 만들어내는** 모듈들. 이 파일들이 바뀌면 config 가 같아도
+# 학습 결과가 달라질 수 있으므로 캐시를 무효화해야 한다 (2026-08-03).
+#   dataset.py      — 학습 궤적 주행 + 잔차/특징 구성 (collect_residual_data, apply_lags)
+#   kernels.py      — 커널 정의
+#   train_offline.py— Type-II ML, 표준화, 워핑, 잡음 모델
+# 제외한 것과 그 이유:
+#   casadi_export.py, online/sparse/sliding_window.py — 캐시에 담기는 학습 결과를
+#     만들지 않는다 (배포·Part 2 경로). 넣으면 무관한 편집에 8.5분 재학습이 걸린다.
+_GP_TRAIN_SOURCES = ("dataset.py", "kernels.py", "train_offline.py")
+
+
+def _gp_code_digest() -> str:
+    """`_GP_TRAIN_SOURCES` 내용의 SHA-256 앞 12자.
+
+    ★ 한계 — `src/gp/` 밖은 덮지 못한다. 학습 궤적은 플랜트(`src/models/`),
+    명목 MPC(`src/control/`), 상태추정기(`src/estimation/`), 경로(`src/path/`)
+    코드에도 의존하는데, 그쪽은 config 스냅샷이 **파라미터만** 붙잡을 뿐 구현은
+    붙잡지 못한다. 그 파일들까지 넣으면 세션마다 캐시가 전멸해 캐시가 무의미해지므로
+    일부러 뺐다. **그쪽 코드를 고쳤으면 `data/gp_cache/` 를 직접 지워라.**
+    """
+    import hashlib
+
+    h = hashlib.sha256()
+    gp_dir = ROOT / "src" / "gp"
+    for name in _GP_TRAIN_SOURCES:            # 고정 순서 — 정렬/OS 순서에 의존하지 않는다
+        h.update(name.encode())
+        h.update((gp_dir / name).read_bytes())
+    return h.hexdigest()[:12]
+
+
+# 학습 코드 신원 = 사람이 읽는 라벨 + 자동 코드 해시. 캐시 키와 스크립트 캐시 파일명이
+# 이걸 함께 쓴다. import 시점 1회 계산 (파일 3개, 비용 무시 가능).
+GP_TRAIN_CODE_ID = f"{FEATURE_SPEC}_{_gp_code_digest()}"
 
 # plant 키 -> 연속 우변 팩토리. 새 플랜트는 여기에만 추가한다.
 _PLANT_FACTORIES: dict[str, Callable] = {
@@ -118,9 +150,11 @@ def _gp_disk_cache_path(exp: ExperimentConfig, tr: ExperimentConfig) -> Path:
     다른 해시가 나와 자동으로 재학습된다 — 오래된 캐시를 몰래 재사용하는 사고를
     구조적으로 막는다(수동으로 캐시를 무효화할 필요가 없다).
 
-    **`FEATURE_SPEC` 도 해시에 넣는다**: config 가 그대로여도 **코드**가 특징 정의를
-    바꾸면(예: 2026-08-01 의 delta_k -> delta_{k-1} 정합) 옛 캐시는 무효다. config 만
-    해시하면 그 변경이 조용히 무시되므로, 특징 규약을 바꿀 때 이 문자열을 함께 올려라.
+    **`GP_TRAIN_CODE_ID` 도 해시에 넣는다**: config 가 그대로여도 **코드**가 학습
+    결과를 바꾸면(예: 2026-08-01 의 delta_k -> delta_{k-1} 정합) 옛 캐시는 무효다.
+    예전에는 사람이 `FEATURE_SPEC` 을 손으로 올려야 했고 실제로 안 올려서 버그
+    캐시본이 재사용된 사고가 있었다 — 지금은 `_gp_code_digest()` 가 자동으로 잡는다
+    (덮는 범위와 한계는 그 함수 docstring 참조).
     """
     import hashlib
     import json
@@ -130,7 +164,7 @@ def _gp_disk_cache_path(exp: ExperimentConfig, tr: ExperimentConfig) -> Path:
         "train_experiment": exp.gp.train_experiment,
         "train_snapshot": tr.to_snapshot(),
         "gp_config": asdict(exp.gp),
-        "feature_spec": FEATURE_SPEC,
+        "feature_spec": GP_TRAIN_CODE_ID,
     }
     digest = hashlib.sha256(
         json.dumps(payload, sort_keys=True, default=str).encode()

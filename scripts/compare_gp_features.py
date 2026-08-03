@@ -51,15 +51,19 @@ from src.gp.dataset import (ResidualDataset, apply_lags, lagged_dim, lap_block_s
                             load_dataset, save_dataset)
 from src.gp.train_offline import load_gp, save_gp, train
 from src.path.reference import Reference
-from src.sim.assemble import collect_training_dataset
+from src.sim.assemble import GP_TRAIN_CODE_ID, collect_training_dataset
 
 EVAL_EXPERIMENT = "part1_gp_lpf_ay4"    # 여기서 gp 그룹(M, 하이퍼파라미터)을 가져온다
 CACHE_DIR = ROOT / "data" / "gp_cache"
-DS_CACHE = CACHE_DIR / "compare_features_dataset.npz"
+# 파일명에 학습 코드 신원을 박는다 — `tune_input_warp.py` 가 이 파일을 읽으므로 두
+# 스크립트가 같은 식을 써야 한다 (assemble.GP_TRAIN_CODE_ID).
+DS_CACHE = CACHE_DIR / f"compare_features_{GP_TRAIN_CODE_ID}_dataset.npz"
 N_EVAL = 4000                            # 홀드아웃 평가 표본 상한 (분산이 O(n*M^2))
 
-# 캐시 파일명 태그. 분할 방식이나 변형 정의가 바뀌면 올려라 — 안 올리면 옛 조건에서
-# 학습된 GP 가 조용히 재사용된다 (2026-08-01 에 랩 분할 버그를 고치면서 v2).
+# 캐시 파일명 태그 — **분할·변형 정의**(이 스크립트 안에만 있는 개념)용이다.
+# `src/gp/` 코드 변경은 `GP_TRAIN_CODE_ID` 가 자동으로 잡으므로 여기서 다루지 않는다.
+# 아래 VARIANTS 나 분할 규칙을 바꿀 때만 올려라
+# (2026-08-01 에 랩 분할 버그를 고치면서 v2).
 SPLIT_TAG = "lapblock_v3_mlrestart"
 
 # (라벨, delta 규약, n_lags, lag_mode)

@@ -1,0 +1,25 @@
+# loop10 학습 GP — **학습 강도 상향(a_y_max 6.0)**. 강도축 방향 뒤집기 실험.
+#
+# 기준선 `loop10.yaml` 과 **`train_experiment` 하나만** 다르다. 하이퍼파라미터 초기값·M·
+# 하한은 전부 동일하게 두어야 "학습 데이터만 바꿨을 때 무엇이 달라지나"가 분리된다.
+#
+# 근거·측정·한계는 `configs/experiment/gp_train_loop10_ay6.yaml` 주석 참조.
+#
+# ## ★ 해석할 때 조심할 것 — 커버리지만 보면 속는다
+#
+# ay6 학습 데이터는 잔차 자체가 크므로 `sigma_f`·`sigma_n` 이 함께 커지고, 그러면
+# **밴드가 넓어져 커버리지가 자동으로 오른다.** 그건 "적응"이 아니라 척도 변화다.
+# 판정은 반드시 **NLPD 와 z_std 를 함께** 보고, 추종 RMS 대가도 같이 본다.
+# (NLPD 는 넓기만 한 밴드에 벌점을 준다.)
+M: 2000
+init_lengthscale: 1.0
+init_sigma_f: 1.0
+init_sigma_n: 0.1
+sigma_n_floor: 1.0e-2
+jitter: 1.0e-8
+
+train_experiment: gp_train_loop10_ay6
+
+tuning_method: type2_ml (하이퍼파라미터 초기값·M 은 loop10.yaml 에서 그대로 승계)
+tuning_budget_closed_loop_evals: 0
+tuning_selection_scenario: 없음 — 튜닝하지 않았다. 학습 출처만 바꾼 대조군
